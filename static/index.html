@@ -55,6 +55,11 @@ tbody tr[data-s]:hover{background:var(--accent-soft);cursor:pointer}
 .a-賣出{background:var(--sell)}.a-減碼{background:var(--trim)}.a-續抱{background:var(--hold)}.a-加碼{background:var(--add)}
 .why{font-size:13px;text-align:left;white-space:normal;min-width:260px;color:var(--muted)}
 .why b{color:var(--ink);font-weight:500}
+.msg{flex-basis:100%;font-size:13px;color:var(--accent);min-height:0}
+.msg:empty{display:none}
+@keyframes flash{from{background:var(--accent-soft);box-shadow:inset 4px 0 0 var(--accent)}to{background:transparent}}
+tr.flash{animation:flash 2.5s ease-out}
+button:disabled{opacity:.6;cursor:wait}
 .empty,.loading{padding:40px;text-align:center;color:var(--muted)}
 .err{color:var(--fail);font-size:12px}
 dialog{border:0;border-radius:12px;padding:0;width:min(960px,96vw);max-height:92vh;background:var(--panel);color:var(--ink);box-shadow:0 20px 60px rgba(0,0,0,.35)}
@@ -103,6 +108,7 @@ h3{font-size:14px;margin:14px 0 6px}
         <button class="primary" id="addWatchBtn">加入</button>
         <select id="preset"><option value="">一次加入一組…</option><option value="tw">台股權值股</option><option value="us">美股科技股</option><option value="brk">巴菲特持股</option></select>
         <input id="search" placeholder="搜尋" style="flex:1;min-width:120px">
+        <div id="watchMsg" class="msg"></div>
       </div>
       <div class="scroll"><table id="scanTable"></table></div>
     </div>
@@ -115,6 +121,7 @@ h3{font-size:14px;margin:14px 0 6px}
         <input id="addHold" placeholder="輸入你持有的股票代號" style="width:240px">
         <button class="primary" id="addHoldBtn">加入持股</button>
         <span class="muted" style="font-size:12px">只要輸入代號，會自動判斷該賣出、減碼、續抱或加碼</span>
+        <div id="holdMsg" class="msg"></div>
       </div>
       <div class="scroll"><table id="holdTable"></table></div>
     </div>
@@ -231,20 +238,53 @@ async function saveList(kind, list) {
   state.data = await api("/api/" + kind, {[kind]: list});
   kind === "watchlist" ? await loadScan() : await loadHoldings();
 }
-async function addTo(kind, input) {
-  const syms = input.value.split(/[\s,，]+/).filter(Boolean);
-  if (!syms.length) return;
-  input.value = "";
-  await saveList(kind, [...state.data[kind], ...syms.map(norm)]);
+// 只分析新加入的股票，不重抓整份清單；完成後捲到該列並標亮
+async function addSymbols(kind, raw, msg, btn) {
+  const inList = s => state.data[kind].some(x => x === s || x + "O" === s || s + "O" === x);
+  const syms = [...new Set(raw.map(norm))];
+  const dup = syms.filter(inList), fresh = syms.filter(s => !inList(s));
+  if (!fresh.length) { msg.textContent = dup.length ? `${dup.join("、")} 已經在清單裡` : ""; flash(kind, dup); return; }
+  btn.disabled = true;
+  msg.textContent = `正在查詢 ${fresh.join("、")}…`;
+  const results = await Promise.all(fresh.map(s => api("/api/stock/" + encodeURIComponent(s))));
+  const good = results.filter(r => !r.error), bad = fresh.filter((_, i) => results[i].error);
+  if (good.length) state.data = await api("/api/" + kind, {[kind]: [...state.data[kind], ...good.map(r => r.symbol)]});
+  const rows = kind === "watchlist" ? state.scan : state.holdings;
+  good.forEach(r => { delete r.chart; rows.push(r); });
+  kind === "watchlist" ? renderScan() : (renderHold(), notifyChanges());
+  msg.textContent = [
+    good.length && "已加入 " + good.map(r => `${r.symbol}（建議${kind === "watchlist" ? r.advice.action : r.hold.action}）`).join("、"),
+    bad.length && `找不到 ${bad.join("、")}，請確認代號`,
+    dup.length && `${dup.join("、")} 已經在清單裡`,
+  ].filter(Boolean).join("；");
+  btn.disabled = false;
+  flash(kind, good.map(r => r.symbol));
 }
-$("#addWatchBtn").onclick = () => addTo("watchlist", $("#addWatch"));
-$("#addHoldBtn").onclick = () => addTo("holdings", $("#addHold"));
-$("#addWatch").onkeydown = e => e.key === "Enter" && $("#addWatchBtn").click();
-$("#addHold").onkeydown = e => e.key === "Enter" && $("#addHoldBtn").click();
-$("#preset").onchange = async e => {
+function flash(kind, syms) {
+  if (kind === "watchlist") { state.filter = ""; $("#search").value = ""; renderScan(); }
+  const table = kind === "watchlist" ? "#scanTable" : "#holdTable";
+  syms.forEach((s, i) => {
+    const tr = document.querySelector(`${table} tr[data-s="${s}"], ${table} tr[data-s="${s}O"]`);
+    if (!tr) return;
+    tr.classList.add("flash");
+    if (i === 0) tr.scrollIntoView({behavior: "smooth", block: "center"});
+    setTimeout(() => tr.classList.remove("flash"), 2500);
+  });
+}
+function addFrom(kind, input, msg, btn) {
+  const raw = input.value.split(/[\s,，、]+/).filter(Boolean);
+  if (!raw.length) { msg.textContent = "請先輸入股票代號"; input.focus(); return; }
+  input.value = "";
+  addSymbols(kind, raw, msg, btn);
+}
+$("#addWatchBtn").onclick = () => addFrom("watchlist", $("#addWatch"), $("#watchMsg"), $("#addWatchBtn"));
+$("#addHoldBtn").onclick = () => addFrom("holdings", $("#addHold"), $("#holdMsg"), $("#addHoldBtn"));
+$("#addWatch").onkeydown = e => { if (e.key === "Enter" && !e.isComposing) $("#addWatchBtn").click(); };
+$("#addHold").onkeydown = e => { if (e.key === "Enter" && !e.isComposing) $("#addHoldBtn").click(); };
+$("#preset").onchange = e => {
   if (!e.target.value) return;
-  const list = PRESETS[e.target.value].map(norm); e.target.value = "";
-  await saveList("watchlist", [...state.data.watchlist, ...list]);
+  const list = PRESETS[e.target.value]; e.target.value = "";
+  addSymbols("watchlist", list, $("#watchMsg"), $("#addWatchBtn"));
 };
 
 // ---------- 個股詳情
