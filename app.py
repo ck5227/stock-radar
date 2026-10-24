@@ -17,7 +17,7 @@ DEFAULT_DATA = {
         "AAPL", "MSFT", "NVDA", "GOOGL", "AMZN", "META", "AVGO", "COST", "KO", "AXP", "V", "BRK-B",
     ],
     "holdings": [],
-    "settings": {"stop_pct": 0.075, "refresh_min": 5},
+    "settings": {"refresh_min": 5},
 }
 
 app = Flask(__name__, static_folder=os.path.join(BASE, "static"))
@@ -76,15 +76,7 @@ def stock(sym):
 
 @app.get("/api/holdings")
 def holdings():
-    data = load()
-    stop_pct = float(data["settings"].get("stop_pct", 0.075))
-
-    def one(pos):
-        try:
-            return analysis.position_signals(pos, analysis.analyze(pos["symbol"]), stop_pct)
-        except Exception as e:
-            return {**pos, "error": str(e)}
-    return jsonify(list(_pool.map(one, data["holdings"])))
+    return jsonify(list(_pool.map(safe_analyze, load()["holdings"])))
 
 
 @app.get("/api/data")
@@ -92,35 +84,23 @@ def get_data():
     return jsonify(load())
 
 
-@app.post("/api/watchlist")
-def set_watchlist():
-    data = load()
+def clean_symbols(items):
     syms = []
-    for s in request.json.get("watchlist", []):
-        s = analysis.normalize_symbol(s)
+    for s in items:
+        if isinstance(s, dict):          # 舊版持股格式 {symbol, cost, ...}
+            s = s.get("symbol", "")
+        s = analysis.normalize_symbol(str(s))
         if s and s not in syms:
             syms.append(s)
-    data["watchlist"] = syms
-    save(data)
-    return jsonify(data)
+    return syms
 
 
-@app.post("/api/holdings")
-def set_holdings():
+@app.post("/api/<kind>")
+def set_list(kind):
+    if kind not in ("watchlist", "holdings"):
+        return jsonify({"error": "unknown list"}), 404
     data = load()
-    clean = []
-    for p in request.json.get("holdings", []):
-        try:
-            clean.append({
-                "symbol": analysis.normalize_symbol(p["symbol"]),
-                "cost": float(p["cost"]),
-                "shares": float(p.get("shares") or 0),
-                "date": p.get("date") or "",
-                "strategy": p.get("strategy") if p.get("strategy") in ("minervini", "buffett") else "minervini",
-            })
-        except (KeyError, TypeError, ValueError):
-            continue
-    data["holdings"] = clean
+    data[kind] = clean_symbols(request.json.get(kind, []))
     save(data)
     return jsonify(data)
 
@@ -129,8 +109,6 @@ def set_holdings():
 def set_settings():
     data = load()
     s = request.json or {}
-    if "stop_pct" in s:
-        data["settings"]["stop_pct"] = min(max(float(s["stop_pct"]), 0.01), 0.5)
     if "refresh_min" in s:
         data["settings"]["refresh_min"] = min(max(int(s["refresh_min"]), 1), 120)
     save(data)

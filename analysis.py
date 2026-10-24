@@ -382,6 +382,8 @@ def analyze(sym):
         "pe": num(fund.get("pe"), 2),
         "minervini": tech,
         "buffett": buff,
+        "advice": buy_advice(tech, buff),
+        "hold": hold_advice(h, tech, buff),
     }
 
 
@@ -401,100 +403,91 @@ def chart_data(sym, days=260):
     }
 
 
-# ---------------------------------------------------------------- 持股訊號
+# ---------------------------------------------------------------- 綜合建議
+# 趨勢面（Minervini）決定「時機」，基本面（Buffett）決定「值不值得」，兩者合併成單一建議。
 
-SEVERITY = {"賣出": 3, "減碼": 2, "持有": 1, "加碼": 0}
+def buy_advice(t, b):
+    """選股：強力買進 / 買進 / 觀察 / 避開。"""
+    q = b["quality"] if b["quality"] is not None else 0.5
+    good, cheap = q >= 0.7, b["candidate"]
+    downtrend = t["stage"].startswith("第四")
+    reasons = []
 
-
-def _action(signals):
-    if not signals:
-        return "持有"
-    worst = max(signals, key=lambda s: SEVERITY[s["action"]])
-    if SEVERITY[worst["action"]] >= 2:
-        return worst["action"]
-    return "加碼" if any(s["action"] == "加碼" for s in signals) else "持有"
-
-
-def position_signals(pos, a, stop_pct=0.075):
-    """pos: {symbol, cost, shares, date?, strategy}; a: analyze() 結果。"""
-    h = get_history(a["symbol"])
-    c, v = h["Close"], h["Volume"]
-    t, b = a["minervini"], a["buffett"]
-    price, cost = a["price"], float(pos["cost"])
-    gain = price / cost - 1
-
-    since = c
-    if pos.get("date"):
-        try:
-            s = c[c.index >= pd.Timestamp(pos["date"])]
-            if not s.empty:
-                since = s
-        except Exception:
-            pass
+    if t["candidate"]:
+        reasons.append("趨勢強且在買點" + ("（帶量突破）" if t["breakout"] else "（接近樞紐點）"))
+    elif t["tt_pass"] == 8:
+        reasons.append("上升趨勢中，等待突破買點")
+    elif downtrend:
+        reasons.append("股價處於下跌趨勢")
     else:
-        since = c.iloc[-60:]
-    peak = max(float(since.max()), price)
-    peak_gain = peak / cost - 1
+        reasons.append(f"趨勢條件 {t['tt_pass']}/8，尚未成形")
 
-    # 停損：預設 7.5%；獲利達停損幅度 3 倍後移到成本價（保本）
-    stop = cost * (1 - stop_pct)
-    if peak_gain >= 3 * stop_pct:
-        stop = max(stop, cost)
+    if good and cheap:
+        reasons.append("優質企業且價格低於內在價值")
+    elif good:
+        reasons.append("優質企業，但價格偏高")
+    elif q >= 0.5:
+        reasons.append("基本面普通")
+    else:
+        reasons.append("基本面偏弱")
+
+    if t["candidate"] and good:
+        action = "強力買進"
+    elif (t["candidate"] and q >= 0.5) or (cheap and not downtrend and t["tt_pass"] >= 5):
+        action = "買進"
+    elif downtrend or (q < 0.5 and t["tt_pass"] < 5):
+        action = "避開"
+    else:
+        action = "觀察"
+    return {"action": action, "reasons": reasons}
+
+
+def hold_advice(h, t, b):
+    """持股：賣出 / 減碼 / 續抱 / 加碼（不需要成本或買進日期）。"""
+    c, v = h["Close"], h["Volume"]
+    price = c.iloc[-1]
     avg_vol50 = v.iloc[-50:].mean()
     vol_ratio = v.iloc[-1] / avg_vol50 if avg_vol50 else 1
+    q = b["quality"] if b["quality"] is not None else 0.5
+    good = q >= 0.7
+    iv, mos = b["intrinsic_value"], b["margin_of_safety"]
 
-    m = []   # Minervini 觀點
-    if price <= stop:
-        m.append({"action": "賣出", "reason": f"觸及停損價 {stop:.2f}" + ("（保本停利）" if stop >= cost else "")})
+    sell, trim, add = [], [], []
+    # 趨勢面
     if t["ma200"] and price < t["ma200"]:
-        m.append({"action": "賣出", "reason": "跌破 200 日均線，主要趨勢轉弱"})
+        sell.append("跌破 200 日均線，主要趨勢轉弱")
     if t["ma50"] and price < t["ma50"]:
-        if vol_ratio >= 1.5:
-            m.append({"action": "賣出", "reason": f"帶量（{vol_ratio:.1f} 倍均量）跌破 50 日均線"})
-        else:
-            m.append({"action": "減碼", "reason": "跌破 50 日均線，留意是否續弱"})
+        (sell if vol_ratio >= 1.5 else trim).append(
+            f"{'帶量' if vol_ratio >= 1.5 else ''}跌破 50 日均線")
+    high20 = c.iloc[-20:].max()
+    if price <= high20 * 0.85:
+        trim.append(f"從近一個月高點回落 {(1 - price / high20) * 100:.0f}%")
     run15 = price / c.iloc[-16] - 1 if len(c) > 16 else 0
-    if run15 >= 0.25 and gain >= 0.25:
-        m.append({"action": "減碼", "reason": f"15 日內急漲 {run15 * 100:.0f}%，可能為高潮噴出，分批獲利"})
-    if gain >= 0.20 and t["ema21"] and price < t["ema21"] and vol_ratio >= 1.3:
-        m.append({"action": "減碼", "reason": "獲利部位帶量跌破 21 日均線，鎖住部分獲利"})
-    if gain < 0:
-        m.append({"action": "持有", "reason": "虧損部位不攤平（Minervini 只對賺錢部位加碼）"})
-    else:
-        if t["tt_pass"] == 8 and t["breakout"] and t["in_buy_zone"]:
-            m.append({"action": "加碼", "reason": f"帶量突破樞紐點 {t['pivot']:.2f}，可金字塔式加碼"})
-        near_ema = t["ema21"] and abs(price / t["ema21"] - 1) <= 0.02
-        if (0.02 <= gain <= 0.25 and t["tt_pass"] >= 7 and near_ema
-                and v.iloc[-5:].mean() < avg_vol50 and price > (t["ma50"] or 0)):
-            m.append({"action": "加碼", "reason": "回測 21 日均線且量縮，趨勢仍在，可小幅加碼"})
-
-    f = []   # Buffett 觀點
-    q, mos, iv = b["quality"], b["margin_of_safety"], b["intrinsic_value"]
-    if q is not None and q < 0.5:
-        f.append({"action": "賣出", "reason": "基本面已不符合優質企業標準（護城河轉弱）"})
+    if run15 >= 0.25:
+        trim.append(f"15 日內急漲 {run15 * 100:.0f}%，可能過熱，可分批獲利")
+    if t["tt_pass"] == 8 and t["breakout"] and t["in_buy_zone"]:
+        add.append(f"帶量突破樞紐點 {t['pivot']:.2f}")
+    if (t["tt_pass"] >= 7 and t["ema21"] and abs(price / t["ema21"] - 1) <= 0.02
+            and v.iloc[-5:].mean() < avg_vol50 and price > (t["ma50"] or 0)):
+        add.append("回測 21 日均線且量縮，趨勢仍在")
+    # 基本面
+    if q < 0.5:
+        sell.append("基本面轉弱，不符合優質企業標準")
     if iv and price > iv * 2:
-        f.append({"action": "減碼", "reason": f"股價超過內在價值 {iv:.2f} 的 2 倍，嚴重高估"})
-    if q is not None and q >= 0.7 and mos is not None and mos >= 0.25:
-        f.append({"action": "加碼", "reason": f"優質企業且安全邊際 {mos * 100:.0f}%，可逢低加碼"})
-    if not f:
-        f.append({"action": "持有", "reason": "優質企業長期持有" if (q or 0) >= 0.7 else "基本面普通，持續觀察"})
+        trim.append(f"股價超過內在價值 {iv:.2f} 的 2 倍")
+    if good and mos is not None and mos >= 0.25:
+        add.append(f"優質企業且安全邊際 {mos * 100:.0f}%")
 
-    m_action, f_action = _action(m), _action(f)
-    strategy = pos.get("strategy", "minervini")
-    return {
-        **pos,
-        "symbol": a["symbol"],
-        "name": a["name"],
-        "currency": a["currency"],
-        "price": price,
-        "change": a["change"],
-        "gain": num(gain),
-        "pnl": num((price - cost) * float(pos.get("shares") or 0), 0),
-        "peak": num(peak, 2),
-        "stop": num(stop, 2),
-        "minervini_action": m_action,
-        "minervini_signals": m,
-        "buffett_action": f_action,
-        "buffett_signals": f,
-        "action": m_action if strategy == "minervini" else f_action,
-    }
+    # 合併：好公司趨勢轉壞先減碼；普通公司趨勢轉壞直接賣
+    if sell and (not good or len(sell) >= 2):
+        action, reasons = "賣出", sell + trim
+    elif sell or trim:
+        action, reasons = "減碼", sell + trim
+        if good and sell:
+            reasons.append("但仍是優質企業，可先減碼觀察")
+    elif add:
+        action, reasons = "加碼", add
+    else:
+        action = "續抱"
+        reasons = ["趨勢與基本面都沒有轉壞" if good else "趨勢未轉壞，持續觀察"]
+    return {"action": action, "reasons": reasons}
