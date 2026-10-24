@@ -1,0 +1,6 @@
+# 個人持股與設定，不上傳
+data.json
+__pycache__/
+*.pyc
+.claude/
+.venv/

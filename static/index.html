@@ -1,0 +1,412 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>選股雷達</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+<style>
+:root{
+  --bg:#f5f6f8; --panel:#fff; --ink:#1b1f24; --muted:#6b7380; --line:#e3e6ea;
+  --up:#d62d2d; --down:#118a4b;            /* 台股慣例：紅漲綠跌 */
+  --accent:#2f5bd3; --accent-soft:#e8eefc;
+  --sell:#b42318; --trim:#c77700; --hold:#6b7380; --add:#2f5bd3;
+  --pass:#118a4b; --fail:#b42318; --na:#9aa1ab;
+}
+@media (prefers-color-scheme: dark){
+  :root{--bg:#111418; --panel:#191d23; --ink:#e7eaee; --muted:#9aa3ae; --line:#2a3038;
+    --up:#ff5c5c; --down:#3fca7f; --accent:#7c9dff; --accent-soft:#232d47;
+    --sell:#ff6b5e; --trim:#f0a73a; --hold:#9aa3ae; --add:#7c9dff; --pass:#3fca7f; --fail:#ff6b5e;}
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font:14px/1.5 "Noto Sans TC","Microsoft JhengHei",system-ui,sans-serif}
+header{display:flex;flex-wrap:wrap;gap:12px;align-items:center;justify-content:space-between;padding:14px 20px;background:var(--panel);border-bottom:1px solid var(--line);position:sticky;top:0;z-index:5}
+h1{font-size:18px;margin:0;letter-spacing:.5px}
+h1 small{font-weight:400;color:var(--muted);font-size:12px;margin-left:8px}
+.status{display:flex;gap:10px;align-items:center;color:var(--muted);font-size:12px;flex-wrap:wrap}
+button,.btn{font:inherit;border:1px solid var(--line);background:var(--panel);color:var(--ink);border-radius:6px;padding:6px 12px;cursor:pointer}
+button:hover{border-color:var(--accent)}
+button.primary{background:var(--accent);border-color:var(--accent);color:#fff}
+nav{display:flex;gap:4px;padding:0 20px;background:var(--panel);border-bottom:1px solid var(--line);overflow-x:auto}
+nav button{border:0;border-bottom:2px solid transparent;border-radius:0;padding:10px 14px;background:none;color:var(--muted);white-space:nowrap}
+nav button.on{color:var(--ink);border-bottom-color:var(--accent);font-weight:600}
+main{padding:20px;max-width:1400px;margin:0 auto}
+.cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px;margin-bottom:16px}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:14px 16px;cursor:pointer}
+.card.on{border-color:var(--accent);box-shadow:0 0 0 1px var(--accent) inset}
+.card .n{font-size:26px;font-weight:700;font-variant-numeric:tabular-nums}
+.card .l{color:var(--muted);font-size:12px}
+.panel{background:var(--panel);border:1px solid var(--line);border-radius:10px;overflow:hidden}
+.toolbar{display:flex;gap:8px;align-items:center;padding:10px 12px;border-bottom:1px solid var(--line);flex-wrap:wrap}
+input,select,textarea{font:inherit;color:var(--ink);background:var(--bg);border:1px solid var(--line);border-radius:6px;padding:6px 8px}
+.scroll{overflow-x:auto}
+table{width:100%;border-collapse:collapse;font-variant-numeric:tabular-nums}
+th,td{padding:9px 10px;text-align:right;border-bottom:1px solid var(--line);white-space:nowrap}
+th{font-size:12px;color:var(--muted);font-weight:500;cursor:pointer;user-select:none;position:sticky;top:0;background:var(--panel)}
+th:first-child,td:first-child,th.l,td.l{text-align:left}
+tbody tr:hover{background:var(--accent-soft);cursor:pointer}
+.sym{font-weight:600}.nm{color:var(--muted);font-size:12px;max-width:220px;overflow:hidden;text-overflow:ellipsis;display:block}
+.up{color:var(--up)}.down{color:var(--down)}.muted{color:var(--muted)}
+.tag{display:inline-block;font-size:11px;padding:1px 7px;border-radius:10px;margin:1px 2px;border:1px solid currentColor}
+.t-m{color:var(--accent)}.t-b{color:#8a5cf6}.t-both{background:var(--accent);color:#fff;border-color:var(--accent)}
+.t-warn{color:var(--trim)}
+.badge{display:inline-block;min-width:44px;text-align:center;font-weight:700;padding:3px 10px;border-radius:6px;color:#fff}
+.a-賣出{background:var(--sell)}.a-減碼{background:var(--trim)}.a-持有{background:var(--hold)}.a-加碼{background:var(--add)}
+.bar{display:inline-block;width:64px;height:6px;background:var(--line);border-radius:3px;vertical-align:middle;margin-right:6px;overflow:hidden}
+.bar i{display:block;height:100%;background:var(--accent)}
+.reasons{font-size:12px;text-align:left;white-space:normal;min-width:240px}
+.reasons div{margin:2px 0}
+.form{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:8px;padding:12px;align-items:end}
+.form label{font-size:12px;color:var(--muted);display:flex;flex-direction:column;gap:3px}
+.empty{padding:40px;text-align:center;color:var(--muted)}
+.loading{padding:40px;text-align:center;color:var(--muted)}
+.err{color:var(--fail);font-size:12px}
+dialog{border:0;border-radius:12px;padding:0;width:min(1000px,96vw);max-height:92vh;background:var(--panel);color:var(--ink);box-shadow:0 20px 60px rgba(0,0,0,.35)}
+dialog::backdrop{background:rgba(0,0,0,.45)}
+.dhead{display:flex;justify-content:space-between;align-items:flex-start;padding:16px 20px;border-bottom:1px solid var(--line);position:sticky;top:0;background:var(--panel)}
+.dbody{padding:16px 20px;overflow:auto;max-height:calc(92vh - 70px)}
+.grid2{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+@media (max-width:760px){.grid2{grid-template-columns:1fr} main{padding:12px} header{padding:12px}}
+.chk{list-style:none;margin:0;padding:0}
+.chk li{display:flex;justify-content:space-between;gap:8px;padding:6px 0;border-bottom:1px dashed var(--line)}
+.chk .ok::before{content:"✔ ";color:var(--pass)}.chk .no::before{content:"✘ ";color:var(--fail)}.chk .na::before{content:"– ";color:var(--na)}
+h3{font-size:14px;margin:14px 0 6px}
+.kv{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:8px;margin:10px 0}
+.kv div{background:var(--bg);border-radius:8px;padding:8px 10px}
+.kv b{display:block;font-size:16px}.kv span{font-size:11px;color:var(--muted)}
+.doc{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:8px 24px 20px;max-width:900px}
+.doc li{margin:4px 0}
+.note{font-size:12px;color:var(--muted);margin-top:14px}
+</style>
+</head>
+<body>
+<header>
+  <h1>選股雷達<small>Minervini 動能 × Buffett 價值</small></h1>
+  <div class="status">
+    <span id="updated">尚未更新</span>
+    <span id="countdown"></span>
+    <label>停損 <input id="stopPct" type="number" min="1" max="50" step="0.5" style="width:62px">%</label>
+    <label>每 <input id="refreshMin" type="number" min="1" max="120" style="width:52px"> 分鐘更新</label>
+    <button id="notifyBtn" title="持股出現賣出/加碼訊號時通知">🔔 通知</button>
+    <button class="primary" id="refreshBtn">立即更新</button>
+  </div>
+</header>
+<nav>
+  <button data-tab="scan" class="on">選股掃描</button>
+  <button data-tab="hold">我的持股</button>
+  <button data-tab="watch">觀察清單</button>
+  <button data-tab="doc">方法說明</button>
+</nav>
+<main>
+  <!-- 選股掃描 -->
+  <section id="tab-scan">
+    <div class="cards" id="cards"></div>
+    <div class="panel">
+      <div class="toolbar">
+        <input id="search" placeholder="搜尋代號或名稱" style="flex:1;min-width:160px">
+        <span class="muted" id="scanCount"></span>
+      </div>
+      <div class="scroll"><table id="scanTable"></table></div>
+    </div>
+  </section>
+
+  <!-- 我的持股 -->
+  <section id="tab-hold" hidden>
+    <div class="cards" id="holdCards"></div>
+    <div class="panel" style="margin-bottom:16px">
+      <div class="form">
+        <label>股票代號<input id="hSym" placeholder="2330 或 AAPL"></label>
+        <label>買進成本<input id="hCost" type="number" step="any"></label>
+        <label>股數<input id="hShares" type="number" step="any"></label>
+        <label>買進日期<input id="hDate" type="date"></label>
+        <label>依循策略<select id="hStrat"><option value="minervini">Minervini 動能</option><option value="buffett">Buffett 價值</option></select></label>
+        <button class="primary" id="hAdd">新增 / 更新持股</button>
+      </div>
+    </div>
+    <div class="panel"><div class="scroll"><table id="holdTable"></table></div></div>
+  </section>
+
+  <!-- 觀察清單 -->
+  <section id="tab-watch" hidden>
+    <div class="panel" style="padding:14px">
+      <p class="muted" style="margin-top:0">每行或以逗號分隔一個代號。台股輸入數字即可（自動判斷上市 .TW / 上櫃 .TWO），美股輸入英文代號。</p>
+      <textarea id="watchText" rows="14" style="width:100%;font-family:ui-monospace,Consolas,monospace"></textarea>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:10px">
+        <button class="primary" id="watchSave">儲存並重新掃描</button>
+        <span class="muted" style="align-self:center">加入預設組合：</span>
+        <button data-preset="tw">台股權值</button>
+        <button data-preset="us">美股科技</button>
+        <button data-preset="brk">巴菲特持股</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- 方法說明 -->
+  <section id="tab-doc" hidden>
+    <div class="doc">
+      <h2>Mark Minervini（SEPA 動能交易）</h2>
+      <p><b>趨勢樣板（Trend Template）8 項條件</b>，全部符合才視為「第二階段上升趨勢」：</p>
+      <ol>
+        <li>股價高於 150 日及 200 日均線</li><li>150 日均線高於 200 日均線</li>
+        <li>200 日均線至少上揚 1 個月</li><li>50 日均線高於 150 日及 200 日均線</li>
+        <li>股價高於 50 日均線</li><li>股價比 52 週低點高 30% 以上</li>
+        <li>股價距 52 週高點 25% 以內</li><li>相對強度（RS）優於大盤（台股比加權指數、美股比 S&amp;P 500）</li>
+      </ol>
+      <p><b>買點</b>：符合趨勢樣板，並出現波動收縮（VCP：振幅一段比一段小且量縮），在帶量（≥1.4 倍均量）突破樞紐點（近 4 週高點）後 5% 以內買進。另參考最近一季 EPS 年增 ≥25%、營收年增 ≥20%。</p>
+      <p><b>賣出</b>：觸及停損（預設 7.5%，可調整）；獲利達停損幅度 3 倍後停損上移至成本；跌破 200 日均線；帶量跌破 50 日均線。<b>減碼</b>：無量跌破 50 日均線、15 日急漲 25% 以上的高潮噴出、獲利部位帶量跌破 21 日均線。</p>
+      <p><b>加碼</b>：只對賺錢的部位加碼（不攤平）——帶量突破新樞紐點，或回測 21 日均線且量縮。</p>
+      <h2>Warren Buffett（價值投資）</h2>
+      <ul>
+        <li>ROE ≥ 15%、負債/權益 &lt; 0.5、毛利率 ≥ 40%（護城河）、淨利率 ≥ 10%</li>
+        <li>近年自由現金流皆為正、各年皆獲利且成長</li>
+        <li>內在價值：自由現金流折現（前 5 年用歷史獲利成長率、上限 20%，後 5 年減半；折現率 10%、永續成長 3%）。金融股改用股價淨值比 ≤ 1.5。</li>
+      </ul>
+      <p><b>持股判斷</b>：品質分數 &lt; 50% → 賣出；股價超過內在價值 2 倍 → 減碼；品質 ≥ 70% 且安全邊際 ≥ 25% → 加碼；其餘長期持有。</p>
+      <h2>資料與限制</h2>
+      <ul>
+        <li>資料來自 Yahoo Finance，股價約延遲 15–20 分鐘；財報每 12 小時更新一次。</li>
+        <li>RS 為與大盤比較的近似值，並附上觀察清單內的百分位排名，並非 IBD 官方 RS Rating。</li>
+        <li>DCF 結果對成長率假設非常敏感，僅供參考。</li>
+      </ul>
+      <p class="note">本工具僅依公開規則自動計算，不構成投資建議。投資前請自行判斷並承擔風險。</p>
+    </div>
+  </section>
+</main>
+
+<dialog id="detail">
+  <div class="dhead"><div id="dTitle"></div><button onclick="detail.close()">關閉</button></div>
+  <div class="dbody" id="dBody"></div>
+</dialog>
+
+<script>
+const $ = s => document.querySelector(s);
+const PRESETS = {
+  tw: ["2330","2317","2454","2308","2382","2891","2881","2882","3711","2303","2412","1216","2912","3008","6669","2603","1301","2002"],
+  us: ["AAPL","MSFT","NVDA","GOOGL","AMZN","META","AVGO","TSLA","AMD","NFLX","CRM","ORCL"],
+  brk: ["AAPL","AXP","BAC","KO","CVX","OXY","KHC","MCO","CB","DVA","VRSN","V","MA","AMZN"],
+};
+let state = {scan: [], holdings: [], data: null, filter: "all", sort: {k: "score", dir: -1}};
+let timer = null, nextAt = 0, chart = null;
+
+const pct = (x, d=1) => x == null ? "–" : (x*100).toFixed(d) + "%";
+const fmt = (x, d=2) => x == null ? "–" : Number(x).toLocaleString(undefined, {minimumFractionDigits: d, maximumFractionDigits: d});
+const mosFmt = m => m == null ? "–" : m >= -1 ? pct(m, 0) : `貴 ${(1 - m).toFixed(1)} 倍`;   // 股價 / 內在價值 = 1 - 安全邊際
+const cls = x => x == null ? "" : x > 0 ? "up" : x < 0 ? "down" : "";
+const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+const api = (u, body) => fetch(u, body ? {method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify(body)} : {}).then(r => r.json());
+
+// ---------- tabs
+document.querySelectorAll("nav button").forEach(b => b.onclick = () => {
+  document.querySelectorAll("nav button").forEach(x => x.classList.toggle("on", x === b));
+  document.querySelectorAll("main > section").forEach(s => s.hidden = s.id !== "tab-" + b.dataset.tab);
+});
+
+// ---------- scan
+function score(r) {
+  if (r.error) return -1;
+  return r.minervini.tt_pass * 10 + (r.buffett.quality || 0) * 50 + (r.minervini.candidate ? 100 : 0) + (r.buffett.candidate ? 100 : 0);
+}
+function tags(r) {
+  const m = r.minervini, b = r.buffett, t = [];
+  if (m.candidate && b.candidate) t.push('<span class="tag t-both">雙重確認</span>');
+  else { if (m.candidate) t.push('<span class="tag t-m">動能買點</span>'); if (b.candidate) t.push('<span class="tag t-b">價值買點</span>'); }
+  if (m.breakout) t.push('<span class="tag t-m">帶量突破</span>');
+  if (m.vcp) t.push('<span class="tag t-m">VCP</span>');
+  if (m.tt_pass === 8 && !m.candidate) t.push('<span class="tag t-warn">趨勢強・等買點</span>');
+  if (b.verdict === "優質但偏貴") t.push('<span class="tag t-warn">優質偏貴</span>');
+  return t.join("");
+}
+const FILTERS = {
+  all: ["全部股票", r => true],
+  both: ["雙重確認", r => r.minervini.candidate && r.buffett.candidate],
+  m: ["Minervini 買點", r => r.minervini.candidate],
+  trend: ["第二階段趨勢", r => r.minervini.tt_pass === 8],
+  b: ["Buffett 買點", r => r.buffett.candidate],
+  q: ["優質企業", r => (r.buffett.quality || 0) >= 0.7],
+};
+function renderScan() {
+  const ok = state.scan.filter(r => !r.error);
+  $("#cards").innerHTML = Object.entries(FILTERS).map(([k, [label, fn]]) =>
+    `<div class="card ${state.filter===k?"on":""}" data-f="${k}"><div class="n">${ok.filter(fn).length}</div><div class="l">${label}</div></div>`).join("");
+  document.querySelectorAll("#cards .card").forEach(c => c.onclick = () => { state.filter = c.dataset.f; renderScan(); });
+
+  const q = $("#search").value.trim().toLowerCase();
+  let rows = state.scan.filter(r => r.error ? state.filter === "all" : FILTERS[state.filter][1](r))
+    .filter(r => !q || r.symbol.toLowerCase().includes(q) || (r.name||"").toLowerCase().includes(q));
+  const keys = {
+    sym: r => r.symbol, price: r => r.price, chg: r => r.change, tt: r => r.minervini?.tt_pass,
+    rs: r => r.minervini?.rs_rank, piv: r => r.minervini?.dist_pivot, bq: r => r.buffett?.quality,
+    mos: r => r.buffett?.margin_of_safety, pe: r => r.pe, score,
+  };
+  const {k, dir} = state.sort;
+  rows.sort((a, b) => { const x = keys[k](a) ?? -1e9, y = keys[k](b) ?? -1e9; return (x > y ? 1 : x < y ? -1 : 0) * dir; });
+  $("#scanCount").textContent = `${rows.length} 檔`;
+  const th = (key, label, l) => `<th data-k="${key}" class="${l?"l":""}">${label}${k===key?(dir>0?" ▲":" ▼"):""}</th>`;
+  $("#scanTable").innerHTML = `<thead><tr>${th("sym","股票",1)}${th("price","股價")}${th("chg","漲跌")}${th("tt","趨勢樣板")}${th("rs","RS 排名")}${th("piv","距樞紐點")}${th("bq","Buffett 品質")}${th("mos","安全邊際")}${th("pe","本益比")}${th("score","結論",1)}</tr></thead><tbody>` +
+    (rows.length ? rows.map(r => r.error
+      ? `<tr><td><span class="sym">${esc(r.symbol)}</span></td><td colspan="9" class="l err">${esc(r.error)}</td></tr>`
+      : `<tr data-s="${esc(r.symbol)}">
+        <td><span class="sym">${esc(r.symbol)}</span><span class="nm">${esc(r.name)}</span></td>
+        <td>${fmt(r.price)}</td><td class="${cls(r.change)}">${pct(r.change, 2)}</td>
+        <td><span class="bar"><i style="width:${r.minervini.tt_pass/8*100}%"></i></span>${r.minervini.tt_pass}/8</td>
+        <td>${r.minervini.rs_rank ?? "–"}</td>
+        <td class="${cls(r.minervini.dist_pivot)}">${pct(r.minervini.dist_pivot)}</td>
+        <td><span class="bar"><i style="width:${(r.buffett.quality||0)*100}%;background:#8a5cf6"></i></span>${r.buffett.quality==null?"–":Math.round(r.buffett.quality*100)+"%"}</td>
+        <td class="${cls(r.buffett.margin_of_safety)}">${mosFmt(r.buffett.margin_of_safety)}</td>
+        <td>${fmt(r.pe,1)}</td>
+        <td class="l">${tags(r) || '<span class="muted">—</span>'}</td></tr>`).join("")
+      : `<tr><td colspan="10" class="empty">沒有符合的股票</td></tr>`) + "</tbody>";
+  document.querySelectorAll("#scanTable th").forEach(t => t.onclick = () => {
+    const key = t.dataset.k; state.sort = {k: key, dir: state.sort.k === key ? -state.sort.dir : -1}; renderScan();
+  });
+  document.querySelectorAll("#scanTable tr[data-s]").forEach(tr => tr.onclick = () => openDetail(tr.dataset.s));
+}
+$("#search").oninput = renderScan;
+
+// ---------- holdings
+function renderHold() {
+  const h = state.holdings;
+  const count = a => h.filter(x => x.action === a).length;
+  $("#holdCards").innerHTML = ["賣出","減碼","持有","加碼"].map(a =>
+    `<div class="card" style="cursor:default"><div class="n"><span class="badge a-${a}" style="font-size:20px">${count(a)}</span></div><div class="l">建議${a}</div></div>`).join("");
+  if (!h.length) { $("#holdTable").innerHTML = `<tr><td class="empty">尚未加入持股。在上方輸入代號、成本與股數。</td></tr>`; return; }
+  $("#holdTable").innerHTML = `<thead><tr><th class="l">股票</th><th>現價</th><th>成本</th><th>股數</th><th>報酬率</th><th>損益</th><th>停損價</th><th class="l">建議</th><th class="l">Minervini 觀點</th><th class="l">Buffett 觀點</th><th></th></tr></thead><tbody>` +
+    h.map((p, i) => p.error
+      ? `<tr><td><span class="sym">${esc(p.symbol)}</span></td><td colspan="9" class="l err">${esc(p.error)}</td><td><button data-del="${i}">刪除</button></td></tr>`
+      : `<tr data-s="${esc(p.symbol)}">
+      <td><span class="sym">${esc(p.symbol)}</span><span class="nm">${esc(p.name)}</span></td>
+      <td>${fmt(p.price)}<div class="${cls(p.change)}" style="font-size:11px">${pct(p.change,2)}</div></td>
+      <td>${fmt(p.cost)}</td><td>${fmt(p.shares,0)}</td>
+      <td class="${cls(p.gain)}">${pct(p.gain)}</td><td class="${cls(p.pnl)}">${fmt(p.pnl,0)}</td>
+      <td>${fmt(p.stop)}</td>
+      <td class="l"><span class="badge a-${p.action}">${p.action}</span><div class="muted" style="font-size:11px">依 ${p.strategy==="buffett"?"Buffett":"Minervini"}</div></td>
+      <td class="reasons"><b class="badge a-${p.minervini_action}" style="font-size:11px;padding:1px 6px">${p.minervini_action}</b>${p.minervini_signals.map(s=>`<div>・${esc(s.reason)}</div>`).join("") || "<div class=muted>趨勢正常，續抱</div>"}</td>
+      <td class="reasons"><b class="badge a-${p.buffett_action}" style="font-size:11px;padding:1px 6px">${p.buffett_action}</b>${p.buffett_signals.map(s=>`<div>・${esc(s.reason)}</div>`).join("")}</td>
+      <td><button data-edit="${i}">編輯</button> <button data-del="${i}">刪除</button></td></tr>`).join("") + "</tbody>";
+  document.querySelectorAll("#holdTable tr[data-s]").forEach(tr => tr.onclick = e => { if (e.target.tagName !== "BUTTON") openDetail(tr.dataset.s); });
+  document.querySelectorAll("[data-del]").forEach(b => b.onclick = async () => {
+    const list = state.data.holdings.filter((_, i) => i !== +b.dataset.del);
+    state.data = await api("/api/holdings", {holdings: list}); loadHoldings();
+  });
+  document.querySelectorAll("[data-edit]").forEach(b => b.onclick = () => {
+    const p = state.data.holdings[+b.dataset.edit];
+    $("#hSym").value = p.symbol; $("#hCost").value = p.cost; $("#hShares").value = p.shares; $("#hDate").value = p.date || ""; $("#hStrat").value = p.strategy;
+    window.scrollTo({top: 0, behavior: "smooth"});
+  });
+}
+$("#hAdd").onclick = async () => {
+  const sym = $("#hSym").value.trim(), cost = parseFloat($("#hCost").value);
+  if (!sym || !(cost > 0)) { alert("請輸入股票代號與買進成本"); return; }
+  const norm = /^\d+$/.test(sym) ? sym + ".TW" : sym.toUpperCase();
+  const item = {symbol: sym, cost, shares: parseFloat($("#hShares").value) || 0, date: $("#hDate").value, strategy: $("#hStrat").value};
+  const list = state.data.holdings.filter(p => p.symbol !== norm && p.symbol !== norm.replace(".TW", ".TWO"));
+  list.push(item);
+  state.data = await api("/api/holdings", {holdings: list});
+  ["#hSym","#hCost","#hShares","#hDate"].forEach(s => $(s).value = "");
+  loadHoldings();
+};
+
+// ---------- watchlist
+function renderWatch() { $("#watchText").value = state.data.watchlist.map(s => s.replace(/\.TW$/, "")).join("\n"); }
+document.querySelectorAll("[data-preset]").forEach(b => b.onclick = () => {
+  const cur = $("#watchText").value.split(/[\s,，]+/).filter(Boolean);
+  $("#watchText").value = [...new Set([...cur, ...PRESETS[b.dataset.preset]])].join("\n");
+});
+$("#watchSave").onclick = async () => {
+  state.data = await api("/api/watchlist", {watchlist: $("#watchText").value.split(/[\s,，]+/).filter(Boolean)});
+  renderWatch(); document.querySelector('nav button[data-tab="scan"]').click(); loadScan();
+};
+
+// ---------- detail
+function checklist(items) {
+  return `<ul class="chk">${items.map(c => `<li><span class="${c.pass===true?"ok":c.pass===false?"no":"na"}">${esc(c.label)}</span><span class="muted">${esc(c.value ?? "")}</span></li>`).join("")}</ul>`;
+}
+async function openDetail(sym) {
+  $("#dTitle").innerHTML = `<b>${esc(sym)}</b>`; $("#dBody").innerHTML = '<div class="loading">載入中…</div>'; detail.showModal();
+  const r = await api("/api/stock/" + encodeURIComponent(sym));
+  if (r.error) { $("#dBody").innerHTML = `<p class="err">${esc(r.error)}</p>`; return; }
+  const m = r.minervini, b = r.buffett;
+  $("#dTitle").innerHTML = `<div style="font-size:18px"><b>${esc(r.symbol)}</b> ${esc(r.name)}</div>
+    <div><b style="font-size:20px">${fmt(r.price)}</b> <span class="${cls(r.change)}">${pct(r.change,2)}</span> <span class="muted">${esc(r.currency||"")} · ${r.date} · ${esc(r.sector||"")}</span></div><div style="margin-top:4px">${tags(r)}</div>`;
+  $("#dBody").innerHTML = `<div style="height:300px"><canvas id="cv"></canvas></div>
+    <div class="grid2">
+      <div><h3>Minervini 趨勢樣板 ${m.tt_pass}/8 · ${esc(m.stage)}</h3>${checklist(m.criteria)}
+        <h3>SEPA 基本面</h3>${checklist(m.sepa)}
+        <div class="kv"><div><span>樞紐點</span><b>${fmt(m.pivot)}</b></div><div><span>距樞紐點</span><b class="${cls(m.dist_pivot)}">${pct(m.dist_pivot)}</b></div>
+        <div><span>今日量 / 50日均量</span><b>${fmt(m.vol_ratio,2)}x</b></div><div><span>VCP 振幅收縮</span><b>${m.contractions.map(x=>pct(x,0)).join(" → ")}</b></div>
+        <div><span>52 週高 / 低</span><b>${fmt(m.hi52,1)} / ${fmt(m.lo52,1)}</b></div><div><span>RS 比大盤</span><b>${fmt(m.rs_ratio,2)}x</b></div></div></div>
+      <div><h3>Buffett 價值檢核 ${b.score}/${b.max} · ${esc(b.verdict)}</h3>${checklist(b.criteria)}
+        <div class="kv"><div><span>內在價值 (DCF)</span><b>${fmt(b.intrinsic_value)}</b></div><div><span>安全邊際</span><b class="${cls(b.margin_of_safety)}">${mosFmt(b.margin_of_safety)}</b></div>
+        <div><span>估值成長率假設</span><b>${pct(b.growth_used)}</b></div><div><span>本益比</span><b>${fmt(r.pe,1)}</b></div></div>
+        ${b.iv_note ? `<p class="muted">${esc(b.iv_note)}</p>` : ""}
+        <p class="note">安全邊際 ≥ 25% 是 Buffett 理想買點；DCF 對假設敏感，僅供參考。</p></div>
+    </div>`;
+  const c = r.chart, css = getComputedStyle(document.documentElement);
+  if (chart) chart.destroy();
+  chart = new Chart($("#cv"), {type: "line", data: {labels: c.dates, datasets: [
+    {label: "收盤", data: c.close, borderColor: css.getPropertyValue("--ink"), borderWidth: 1.6, pointRadius: 0},
+    {label: "50日", data: c.ma50, borderColor: "#2f5bd3", borderWidth: 1, pointRadius: 0},
+    {label: "150日", data: c.ma150, borderColor: "#c77700", borderWidth: 1, pointRadius: 0},
+    {label: "200日", data: c.ma200, borderColor: "#b42318", borderWidth: 1, pointRadius: 0},
+  ]}, options: {maintainAspectRatio: false, interaction: {mode: "index", intersect: false},
+    plugins: {legend: {labels: {color: css.getPropertyValue("--muted"), boxWidth: 12}}},
+    scales: {x: {ticks: {maxTicksLimit: 8, color: css.getPropertyValue("--muted")}, grid: {display: false}},
+             y: {ticks: {color: css.getPropertyValue("--muted")}, grid: {color: css.getPropertyValue("--line")}}}}});
+}
+
+// ---------- notifications
+$("#notifyBtn").onclick = async () => {
+  if (!("Notification" in window)) return alert("此瀏覽器不支援通知");
+  const p = await Notification.requestPermission();
+  $("#notifyBtn").textContent = p === "granted" ? "🔔 通知已開啟" : "🔕 通知未開啟";
+};
+function notifyChanges() {
+  let prev = {};
+  try { prev = JSON.parse(localStorage.getItem("lastActions") || "{}"); } catch {}
+  const now = {};
+  state.holdings.filter(p => !p.error).forEach(p => {
+    now[p.symbol] = p.action;
+    if (prev[p.symbol] && prev[p.symbol] !== p.action && p.action !== "持有" && window.Notification?.permission === "granted") {
+      const why = (p.strategy === "buffett" ? p.buffett_signals : p.minervini_signals).find(s => s.action === p.action);
+      new Notification(`${p.symbol} 建議${p.action}`, {body: why ? why.reason : ""});
+    }
+  });
+  try { localStorage.setItem("lastActions", JSON.stringify(now)); } catch {}
+}
+
+// ---------- loading / refresh
+async function loadScan() {
+  if (!state.scan.length) $("#scanTable").innerHTML = '<tr><td class="loading">正在下載股價與財報資料，第一次約需 30–60 秒…</td></tr>';
+  state.scan = await api("/api/scan"); renderScan();
+}
+async function loadHoldings() {
+  state.holdings = await api("/api/holdings"); renderHold(); notifyChanges();
+}
+async function refreshAll() {
+  $("#refreshBtn").disabled = true; $("#updated").textContent = "更新中…";
+  try { await Promise.all([loadScan(), loadHoldings()]); $("#updated").textContent = "更新於 " + new Date().toLocaleTimeString(); }
+  catch (e) { $("#updated").textContent = "更新失敗：" + e.message; }
+  $("#refreshBtn").disabled = false;
+  nextAt = Date.now() + state.data.settings.refresh_min * 60000;
+}
+setInterval(() => {
+  if (!nextAt) return;
+  const s = Math.max(0, Math.round((nextAt - Date.now()) / 1000));
+  $("#countdown").textContent = `下次更新 ${Math.floor(s/60)}:${String(s%60).padStart(2,"0")}`;
+  if (s === 0 && !document.hidden && !$("#refreshBtn").disabled) refreshAll();
+}, 1000);
+$("#refreshBtn").onclick = refreshAll;
+$("#stopPct").onchange = async e => { state.data = await api("/api/settings", {stop_pct: e.target.value / 100}); loadHoldings(); };
+$("#refreshMin").onchange = async e => { state.data = await api("/api/settings", {refresh_min: e.target.value}); nextAt = Date.now() + state.data.settings.refresh_min * 60000; };
+
+(async () => {
+  state.data = await api("/api/data");
+  $("#stopPct").value = +(state.data.settings.stop_pct * 100).toFixed(2);
+  $("#refreshMin").value = state.data.settings.refresh_min;
+  if (window.Notification?.permission === "granted") $("#notifyBtn").textContent = "🔔 通知已開啟";
+  renderWatch();
+  refreshAll();
+})();
+</script>
+</body>
+</html>
