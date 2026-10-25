@@ -84,6 +84,12 @@ button:disabled{opacity:.6;cursor:wait}
 .tabs-sm button.on{background:var(--accent);border-color:var(--accent);color:#fff}
 .trades td,.trades th{font-size:12px;padding:5px 8px}
 .warn{background:var(--panel);border:1px solid var(--line);border-left:3px solid var(--trim);padding:10px 14px;border-radius:6px;font-size:13px;margin:0 0 16px;color:var(--muted)}
+.viewbar{display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin-bottom:10px;font-size:13px}
+.viewbar button.on{background:var(--accent);border-color:var(--accent);color:#fff}
+.dual{display:flex;align-items:center;gap:6px;margin:2px 0;white-space:nowrap}
+.dual .lbl{font-size:11px;color:var(--muted)}
+.badge.sm{min-width:58px;padding:2px 6px;font-size:12px}
+.why .ln{margin:2px 0}
 .empty,.loading{padding:40px;text-align:center;color:var(--muted)}
 .err{color:var(--fail);font-size:12px}
 dialog{border:0;border-radius:12px;padding:0;width:min(960px,96vw);max-height:92vh;background:var(--panel);color:var(--ink);box-shadow:0 20px 60px rgba(0,0,0,.35)}
@@ -127,6 +133,7 @@ h3{font-size:14px;margin:14px 0 6px}
 <div class="market" id="market"></div>
 <main>
   <section id="tab-scan">
+    <div class="viewbar"><span class="muted">卡片統計與排序依：</span><button data-view="short">短線（約 1 個月）</button><button data-view="long">長線（約半年到一年）</button></div>
     <div class="cards" id="scanCards"></div>
     <div class="panel">
       <div class="toolbar">
@@ -141,6 +148,7 @@ h3{font-size:14px;margin:14px 0 6px}
   </section>
 
   <section id="tab-hold" hidden>
+    <div class="viewbar"><span class="muted">卡片統計與排序依：</span><button data-view="short">短線（約 1 個月）</button><button data-view="long">長線（約半年到一年）</button></div>
     <div class="cards" id="holdCards"></div>
     <div class="panel">
       <div class="toolbar">
@@ -175,7 +183,9 @@ h3{font-size:14px;margin:14px 0 6px}
       </ul>
       <h3>大盤方向</h3>
       <p>約四分之三的股票跟著大盤走。頁面上方顯示台股加權指數與美股 S&amp;P 500 的狀態：<b>多頭</b>（在 50 與 200 日線之上）照常判斷；<b>修正</b>（跌破 50 日線或 200 日線走平）時「強力買進」降為「買進」；<b>空頭</b>（跌破 200 日線）時所有買進降為「觀察」、持股不加碼。</p>
-      <h3>選股建議</h3>
+      <h3>短線與長線</h3>
+      <p>每檔股票同時給兩種建議。<b>短線</b>以 Minervini 的買點與停損為主，回測中持有中位數約 3–4 週、賺錢的部位約 2 個月；<b>長線</b>以 Buffett 的公司品質為主、只用 200 日線把關趨勢，持有中位數約 6 個月、賺錢的部位約 11 個月。長線不因一般回檔或估值偏高就減碼，只在跌破 200 日線或基本面轉弱時動作。</p>
+      <h3>選股建議（短線）</h3>
       <table>
         <tr><td><span class="badge a-強力買進">強力買進</span></td><td>趨勢正在買點，而且是優質企業（兩者都同意）</td></tr>
         <tr><td><span class="badge a-買進">買進</span></td><td>趨勢在買點且基本面不差；或是好公司價格便宜且沒有在跌</td></tr>
@@ -207,7 +217,7 @@ const PRESETS = {
   brk: ["AAPL","AXP","BAC","KO","CVX","OXY","KHC","MCO","CB","V","MA","AMZN"],
 };
 const BUY = ["強力買進","買進","觀察","避開"], HOLD = ["賣出","減碼","續抱","加碼"];
-let state = {scan: [], holdings: [], data: null, filter: ""}, nextAt = 0, chart = null;
+let state = {scan: [], holdings: [], data: null, filter: "", view: (() => { try { return localStorage.getItem("stockRadarView") || "long"; } catch { return "long"; } })()}, nextAt = 0, chart = null;
 
 const pct = (x, d=1) => x == null ? "–" : (x*100).toFixed(d) + "%";
 const fmt = (x, d=2) => x == null ? "–" : Number(x).toLocaleString(undefined, {minimumFractionDigits: d, maximumFractionDigits: d});
@@ -215,7 +225,7 @@ const cls = x => x == null ? "" : x > 0 ? "up" : x < 0 ? "down" : "";
 const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
 const api = (u, body) => fetch(u, body ? {method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify(body)} : {}).then(r => r.json());
 const norm = s => /^\d+$/.test(s) ? s + ".TW" : s.toUpperCase();
-const badge = a => `<span class="badge a-${a}">${a}</span>`;
+const badge = (a, size = "") => `<span class="badge ${size} a-${a}">${a}</span>`;
 const stockCell = r => `<td class="l"><span class="sym">${esc(r.symbol)}</span><span class="nm">${esc(r.name)}</span></td>`;
 const priceCells = r => `<td class="c-px">${fmt(r.price)}<span class="m-chg ${cls(r.change)}">${pct(r.change, 2)}</span></td><td class="c-chg ${cls(r.change)}">${pct(r.change, 2)}</td>`;
 const valuation = b => b.margin_of_safety == null ? "–" : b.margin_of_safety >= 0 ? "便宜 " + pct(b.margin_of_safety, 0) : b.margin_of_safety >= -1 ? "偏貴 " + pct(-b.margin_of_safety, 0) : `貴 ${(1 - b.margin_of_safety).toFixed(1)} 倍`;
@@ -226,23 +236,38 @@ document.querySelectorAll("nav button").forEach(b => b.onclick = () => {
 });
 
 // ---------- 選股
+// 短線（Minervini 時機為主，約 1 個月）與長線（Buffett 品質為主＋200 日線，約半年到一年）分開建議
+const buyOf = (r, v = state.view) => v === "long" ? r.advice_long : r.advice;
+const holdOf = (r, v = state.view) => v === "long" ? r.hold_long : r.hold;
+const dual = (a, b) => `<div class="dual"><span class="lbl">短線</span>${badge(a.action, "sm")}</div><div class="dual"><span class="lbl">長線</span>${badge(b.action, "sm")}</div>`;
+const dualWhy = (a, b) => `<div class="ln"><b>短線</b> ${a.reasons.map(esc).join("；")}</div><div class="ln"><b>長線</b> ${b.reasons.map(esc).join("；")}</div>`;
+function setView(v) {
+  state.view = v;
+  try { localStorage.setItem("stockRadarView", v); } catch {}
+  state.filter = "";
+  renderScan(); renderHold();
+}
+document.querySelectorAll("[data-view]").forEach(b => b.onclick = () => setView(b.dataset.view));
+function paintView() { document.querySelectorAll("[data-view]").forEach(b => b.classList.toggle("on", b.dataset.view === state.view)); }
+
 function renderScan() {
+  paintView();
   const ok = state.scan.filter(r => !r.error);
-  $("#scanCards").innerHTML = BUY.map(a => `<div class="card ${state.filter===a?"on":""}" data-f="${a}"><div class="n">${ok.filter(r => r.advice.action === a).length}</div>${badge(a)}</div>`).join("");
+  $("#scanCards").innerHTML = BUY.map(a => `<div class="card ${state.filter===a?"on":""}" data-f="${a}"><div class="n">${ok.filter(r => buyOf(r).action === a).length}</div>${badge(a)}</div>`).join("");
   document.querySelectorAll("#scanCards .card").forEach(c => c.onclick = () => { state.filter = state.filter === c.dataset.f ? "" : c.dataset.f; renderScan(); });
 
   const q = $("#search").value.trim().toLowerCase();
   const rows = state.scan
-    .filter(r => !state.filter || (!r.error && r.advice.action === state.filter))
+    .filter(r => !state.filter || (!r.error && buyOf(r).action === state.filter))
     .filter(r => !q || r.symbol.toLowerCase().includes(q) || (r.name || "").toLowerCase().includes(q))
-    .sort((a, b) => (a.error ? 9 : BUY.indexOf(a.advice.action)) - (b.error ? 9 : BUY.indexOf(b.advice.action))
+    .sort((a, b) => (a.error ? 9 : BUY.indexOf(buyOf(a).action)) - (b.error ? 9 : BUY.indexOf(buyOf(b).action))
       || (b.minervini?.tt_pass ?? 0) - (a.minervini?.tt_pass ?? 0));
   $("#scanTable").innerHTML = `<thead><tr><th class="l">股票</th><th>股價</th><th>漲跌</th><th class="l">建議</th><th class="l">理由</th><th>趨勢</th><th>體質</th><th>估值</th><th></th></tr></thead><tbody>` +
     (rows.length ? rows.map(r => r.error
       ? `<tr><td class="l sym">${esc(r.symbol)}</td><td colspan="7" class="l err">${esc(r.error)}</td><td class="c-rm"><button class="x" data-rm="${esc(r.symbol)}" title="移除">✕</button></td></tr>`
       : `<tr data-s="${esc(r.symbol)}">${stockCell(r)}${priceCells(r)}
-        <td class="l c-act">${badge(r.advice.action)}</td>
-        <td class="why">${r.advice.reasons.map(esc).join("；")}</td>
+        <td class="l c-act">${dual(r.advice, r.advice_long)}</td>
+        <td class="why">${dualWhy(r.advice, r.advice_long)}</td>
         <td class="c-x2">${r.minervini.tt_pass}/8</td>
         <td class="c-x2">${r.buffett.quality == null ? "–" : Math.round(r.buffett.quality * 100) + " 分"}</td>
         <td class="c-x2 ${cls(r.buffett.margin_of_safety)}">${valuation(r.buffett)}</td>
@@ -254,16 +279,17 @@ $("#search").oninput = renderScan;
 
 // ---------- 持股
 function renderHold() {
+  paintView();
   const ok = state.holdings.filter(r => !r.error);
-  $("#holdCards").innerHTML = HOLD.map(a => `<div class="card" style="cursor:default"><div class="n">${ok.filter(r => r.hold.action === a).length}</div>${badge(a)}</div>`).join("");
-  const rows = [...state.holdings].sort((a, b) => (a.error ? 9 : HOLD.indexOf(a.hold.action)) - (b.error ? 9 : HOLD.indexOf(b.hold.action)));
+  $("#holdCards").innerHTML = HOLD.map(a => `<div class="card" style="cursor:default"><div class="n">${ok.filter(r => holdOf(r).action === a).length}</div>${badge(a)}</div>`).join("");
+  const rows = [...state.holdings].sort((a, b) => (a.error ? 9 : HOLD.indexOf(holdOf(a).action)) - (b.error ? 9 : HOLD.indexOf(holdOf(b).action)));
   $("#holdTable").innerHTML = !rows.length
     ? `<tbody><tr><td class="empty">還沒有持股。在上方輸入你持有的股票代號，例如 2330。</td></tr></tbody>`
     : `<thead><tr><th class="l">股票</th><th>股價</th><th>漲跌</th><th class="l">建議</th><th class="l">理由</th><th></th></tr></thead><tbody>` +
       rows.map(r => r.error
         ? `<tr><td class="l sym">${esc(r.symbol)}</td><td colspan="4" class="l err">${esc(r.error)}</td><td class="c-rm"><button class="x" data-rm="${esc(r.symbol)}">✕</button></td></tr>`
-        : `<tr data-s="${esc(r.symbol)}">${stockCell(r)}${priceCells(r)}<td class="l c-act">${badge(r.hold.action)}</td>
-          <td class="why">${r.hold.reasons.map(esc).join("；")}</td><td class="c-rm"><button class="x" data-rm="${esc(r.symbol)}" title="移除">✕</button></td></tr>`).join("") + "</tbody>";
+        : `<tr data-s="${esc(r.symbol)}">${stockCell(r)}${priceCells(r)}<td class="l c-act">${dual(r.hold, r.hold_long)}</td>
+          <td class="why">${dualWhy(r.hold, r.hold_long)}</td><td class="c-rm"><button class="x" data-rm="${esc(r.symbol)}" title="移除">✕</button></td></tr>`).join("") + "</tbody>";
   bindRows("#holdTable", "holdings");
 }
 
@@ -302,7 +328,7 @@ async function addSymbols(kind, raw, msg, btn) {
   good.forEach(r => { delete r.chart; rows.push(r); });
   kind === "watchlist" ? renderScan() : (renderHold(), notifyChanges());
   msg.textContent = [
-    good.length && "已加入 " + good.map(r => `${r.symbol}（建議${kind === "watchlist" ? r.advice.action : r.hold.action}）`).join("、"),
+    good.length && "已加入 " + good.map(r => `${r.symbol}（短線${kind === "watchlist" ? r.advice.action : r.hold.action}／長線${kind === "watchlist" ? r.advice_long.action : r.hold_long.action}）`).join("、"),
     bad.length && `找不到 ${bad.join("、")}，請確認代號`,
     dup.length && `${dup.join("、")} 已經在清單裡`,
   ].filter(Boolean).join("；");
@@ -347,8 +373,9 @@ async function openDetail(sym) {
     <div><b style="font-size:20px">${fmt(r.price)}</b> <span class="${cls(r.change)}">${pct(r.change,2)}</span> <span class="muted">${esc(r.currency||"")} · ${r.date}</span></div>`;
   $("#dBody").innerHTML = `
     <div class="verdict">
-      <div><h4>如果還沒買</h4>${badge(r.advice.action)}<ul>${r.advice.reasons.map(x => `<li>${esc(x)}</li>`).join("")}</ul></div>
-      <div><h4>如果已經持有</h4>${badge(r.hold.action)}<ul>${r.hold.reasons.map(x => `<li>${esc(x)}</li>`).join("")}</ul></div>
+      ${[["還沒買・短線（約 1 個月）", r.advice], ["還沒買・長線（約半年到一年）", r.advice_long],
+         ["已持有・短線", r.hold], ["已持有・長線", r.hold_long]].map(([t, x]) =>
+        `<div><h4>${t}</h4>${badge(x.action)}<ul>${x.reasons.map(y => `<li>${esc(y)}</li>`).join("")}</ul></div>`).join("")}
     </div>
     <div style="height:280px"><canvas id="cv"></canvas></div>
     <details><summary>查看詳細條件</summary>
@@ -383,9 +410,12 @@ function notifyChanges() {
   try { prev = JSON.parse(localStorage.getItem("holdActions") || "{}"); } catch {}
   const now = {};
   state.holdings.filter(r => !r.error).forEach(r => {
-    now[r.symbol] = r.hold.action;
-    if (prev[r.symbol] && prev[r.symbol] !== r.hold.action && r.hold.action !== "續抱" && window.Notification?.permission === "granted")
-      new Notification(`${r.symbol} 建議${r.hold.action}`, {body: r.hold.reasons.join("；")});
+    [["短線", r.hold], ["長線", r.hold_long]].forEach(([v, x]) => {
+      const k = `${r.symbol}:${v}`;
+      now[k] = x.action;
+      if (prev[k] && prev[k] !== x.action && x.action !== "續抱" && window.Notification?.permission === "granted")
+        new Notification(`${r.symbol} ${v}建議${x.action}`, {body: x.reasons.join("；")});
+    });
   });
   try { localStorage.setItem("holdActions", JSON.stringify(now)); } catch {}
 }

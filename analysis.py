@@ -446,6 +446,8 @@ def analyze(sym):
         "market": mkt,
         "advice": buy_advice(tech, buff, mkt),
         "hold": hold_advice(h, tech, buff, mkt),
+        "advice_long": buy_advice_long(price, tech, buff, mkt),
+        "hold_long": hold_advice_long(h, tech, buff, mkt),
     }
 
 
@@ -490,8 +492,9 @@ def market_status(index_sym):
     }
 
 
-# ---------------------------------------------------------------- 綜合建議
+# ---------------------------------------------------------------- 短線建議
 # 趨勢面（Minervini）決定「時機」，基本面（Buffett）決定「值不值得」，兩者合併成單一建議。
+# 回測中短線持有中位數約 3–4 週、賺錢的部位約 2 個月。
 
 def buy_advice(t, b, mkt=None):
     """選股：強力買進 / 買進 / 觀察 / 避開。"""
@@ -587,4 +590,84 @@ def hold_advice(h, t, b, mkt=None):
     else:
         action = "續抱"
         reasons = ["趨勢與基本面都沒有轉壞" if good else "趨勢未轉壞，持續觀察"]
+    return {"action": action, "reasons": reasons}
+
+
+# ---------------------------------------------------------------- 長線建議
+# 回測顯示長線持有（只在跌破 200 日線時出場）中位數約 6 個月、賺錢的部位約 11 個月，
+# 每筆期望值遠高於短線規則。長線以 Buffett 的公司品質為主，趨勢只用 200 日線把關。
+
+def buy_advice_long(price, t, b, mkt=None):
+    """長線選股：好公司、價格不離譜、主要趨勢（200 日線）向上，回檔到 50 日線附近是好買點。"""
+    q = b["quality"] if b["quality"] is not None else 0.5
+    good, cheap = q >= 0.7, b["candidate"]
+    iv = b["intrinsic_value"]
+    above200 = bool(t["ma200"]) and price > t["ma200"]
+    near50 = bool(t["ma50"]) and abs(price / t["ma50"] - 1) <= 0.05
+    pricey = bool(iv) and price > iv * 2
+    reasons = []
+
+    if q < 0.5:
+        action = "避開"
+        reasons.append("公司體質不符合長期持有標準")
+    elif not above200:
+        action = "觀察" if good else "避開"
+        reasons.append("股價在 200 日線之下，主要趨勢未轉強" + ("，好公司可等站回再買" if good else ""))
+    elif good and cheap:
+        action = "強力買進"
+        reasons.append("優質企業、價格低於內在價值，且主要趨勢向上")
+    elif good and near50 and not pricey:
+        action = "買進"
+        reasons.append("優質企業回檔到 50 日線附近，長線好買點")
+    elif good:
+        action = "觀察"
+        reasons.append("優質企業，但" + ("股價遠高於內在價值" if pricey else "離 50 日線較遠，可等回檔"))
+    else:
+        action = "觀察"
+        reasons.append("基本面普通，長線吸引力有限")
+
+    if mkt and mkt["status"] == "空頭" and action == "強力買進":
+        action = "買進"
+        reasons.append(f"{mkt['name']}為空頭，可分批慢慢買")
+    return {"action": action, "reasons": reasons}
+
+
+def hold_advice_long(h, t, b, mkt=None):
+    """長線持股：一般回檔都續抱，只有跌破 200 日線、基本面轉弱或嚴重高估才動作。"""
+    c, v = h["Close"], h["Volume"]
+    price = c.iloc[-1]
+    q = b["quality"] if b["quality"] is not None else 0.5
+    good = q >= 0.7
+    iv, mos = b["intrinsic_value"], b["margin_of_safety"]
+    reasons, action = [], "續抱"
+
+    if q < 0.5:
+        action = "賣出"
+        reasons.append("基本面轉弱，不符合長期持有標準")
+    if t["ma200"] and price < t["ma200"]:
+        if good and action != "賣出":
+            action = "減碼"
+            reasons += ["跌破 200 日均線，主要趨勢轉弱", "仍是優質企業，可先減碼，站回 200 日線再補"]
+        else:
+            action = "賣出"
+            reasons.append("跌破 200 日均線，主要趨勢轉弱")
+    pricey = bool(iv) and price > iv * 2   # 長線不因貴就賣（Buffett 長抱可口可樂、蘋果），只是不加碼
+
+    if action == "續抱":
+        add = []
+        if good and mos is not None and mos >= 0.25:
+            add.append(f"優質企業且安全邊際 {mos * 100:.0f}%")
+        if (good and t["tt_pass"] >= 6 and t["ma50"] and abs(price / t["ma50"] - 1) <= 0.03
+                and v.iloc[-5:].mean() < v.iloc[-50:].mean()):
+            add.append("回測 50 日線且量縮，主要趨勢仍向上")
+        if add and pricey and not (mos is not None and mos >= 0.25):
+            reasons = add + ["但股價超過內在價值 2 倍，不宜加碼"]
+        elif add and mkt and mkt["status"] == "空頭":
+            reasons = add + [f"但{mkt['name']}為空頭，暫不加碼"]
+        elif add:
+            action, reasons = "加碼", add
+        else:
+            reasons = ["站穩 200 日線，回檔屬正常波動" + ("，好公司長期持有" if good else "")]
+            if pricey:
+                reasons.append("估值偏高（超過內在價值 2 倍），續抱但不加碼")
     return {"action": action, "reasons": reasons}

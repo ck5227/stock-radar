@@ -6,6 +6,7 @@
 通知時機：
   持股：建議變成「賣出／減碼／加碼」
   觀察清單：建議變成「強力買進／買進」
+短線與長線分開追蹤；STYLE=short 或 long 可只收其中一種（預設 both 兩種都收）。
 同一檔股票的同一個建議，一天最多通知一次（盤中訊號可能來回變動）。
 """
 import datetime as dt
@@ -18,6 +19,7 @@ import analysis
 STATE_FILE = "alert_state.json"
 HOLD_ALERT = {"賣出": ("rotating_light", 5), "減碼": ("warning", 4), "加碼": ("chart_with_upwards_trend", 4)}
 BUY_ALERT = {"強力買進": ("star", 4), "買進": ("moneybag", 3)}
+VIEWS = {"short": ("短線", "hold", "advice"), "long": ("長線", "hold_long", "advice_long")}
 
 
 def symbols(env):
@@ -47,14 +49,16 @@ def main():
     first_run = not state.get("actions")
     actions, notified = state.get("actions", {}), state.get("notified", {})
     alerts, summary = [], []
+    style = os.environ.get("STYLE", "both").strip().lower()
+    views = [v for v in VIEWS if style in ("both", v)] or list(VIEWS)
 
-    def check(kind, sym, action, reasons, table):
-        key = f"{kind}:{sym}"
+    def check(kind, sym, action, reasons, table, label):
+        key = f"{kind}:{sym}:{label}"
         changed = actions.get(key) != action
         actions[key] = action
         if action in table and changed and notified.get(key) != f"{action}@{today}":
             notified[key] = f"{action}@{today}"
-            alerts.append((sym, action, reasons, *table[action]))
+            alerts.append((sym, label, action, reasons, *table[action]))
 
     for sym in symbols("HOLDINGS"):
         try:
@@ -62,27 +66,33 @@ def main():
         except Exception as e:
             print(sym, "失敗：", e)
             continue
-        check("H", a["symbol"], a["hold"]["action"], a["hold"]["reasons"], HOLD_ALERT)
-        summary.append(f"{a['symbol']} {a['hold']['action']}")
+        parts = []
+        for v in views:
+            label, hold_key, _ = VIEWS[v]
+            check("H", a["symbol"], a[hold_key]["action"], a[hold_key]["reasons"], HOLD_ALERT, label)
+            parts.append(f"{label}{a[hold_key]['action']}")
+        summary.append(f"{a['symbol']}（{'、'.join(parts)}）")
     for sym in symbols("WATCHLIST"):
         try:
             a = analysis.analyze(sym)
         except Exception as e:
             print(sym, "失敗：", e)
             continue
-        check("W", a["symbol"], a["advice"]["action"], a["advice"]["reasons"], BUY_ALERT)
+        for v in views:
+            label, _, buy_key = VIEWS[v]
+            check("W", a["symbol"], a[buy_key]["action"], a[buy_key]["reasons"], BUY_ALERT, label)
 
     if first_run:
-        push(topic, "選股雷達通知已啟用", "目前持股：" + ("、".join(summary) or "無") +
+        push(topic, "選股雷達通知已啟用", "目前持股：" + ("；".join(summary) or "無") +
              "\n之後建議改變時會通知你。", "white_check_mark", 3, url)
-    for sym, action, reasons, tag, priority in alerts:
+    for sym, label, action, reasons, tag, priority in alerts:
         kind = "持股" if action in HOLD_ALERT else "買點"
-        push(topic, f"{sym} 建議{action}（{kind}）", "；".join(reasons), tag, priority, url)
-        print("已通知", sym, action)
+        push(topic, f"{sym} {label}建議{action}（{kind}）", "；".join(reasons), tag, priority, url)
+        print("已通知", sym, label, action)
 
     with open(STATE_FILE, "w", encoding="utf-8") as f:
         json.dump({"actions": actions, "notified": notified, "updated": dt.datetime.now().isoformat()}, f, ensure_ascii=False)
-    print(f"檢查完成：{len(actions)} 檔，通知 {len(alerts)} 則")
+    print(f"檢查完成：{len(actions)} 項建議，通知 {len(alerts)} 則")
 
 
 if __name__ == "__main__":
