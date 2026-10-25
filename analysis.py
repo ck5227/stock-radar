@@ -54,11 +54,17 @@ def benchmark_for(sym):
 
 def get_history(sym):
     def fetch():
-        h = yf.Ticker(sym).history(period="2y", auto_adjust=True)
+        t = yf.Ticker(sym)
+        h = t.history(period="2y", auto_adjust=True)
         if h is None or h.empty or len(h) < 30:
             raise ValueError(f"找不到 {sym} 的股價資料")
         h = h[["Open", "High", "Low", "Close", "Volume"]].dropna()
         h.index = h.index.tz_localize(None)
+        try:
+            meta = t.history_metadata or {}
+        except Exception:
+            meta = {}
+        h.attrs["meta"] = {k: meta.get(k) for k in ("longName", "shortName", "currency")}
         return h
     return _cached(("h", sym), PRICE_TTL, fetch)
 
@@ -100,7 +106,8 @@ def get_fundamentals(sym):
             except Exception:
                 return None
 
-        inc, qinc, cf = safe("income_stmt"), safe("quarterly_income_stmt"), safe("cashflow")
+        inc, qinc, cf, bs = (safe(a) for a in ("income_stmt", "quarterly_income_stmt", "cashflow", "balance_sheet"))
+        qbs = safe("quarterly_balance_sheet")
         net_income = _row(inc, "Net Income", "Net Income Common Stockholders")
         fcf = _row(cf, "Free Cash Flow")
         q_eps = _row(qinc, "Diluted EPS", "Basic EPS")
@@ -115,6 +122,38 @@ def get_fundamentals(sym):
                 return None
             return series.iloc[-1] / prev - 1
 
+        def last(df, *names):
+            r = _row(df, *names)
+            return float(r.iloc[-1]) if r is not None else None
+
+        def ratio(a, b):
+            return a / b if a is not None and b not in (None, 0) else None
+
+        # 雲端主機常被 Yahoo 擋下公司簡介（info），這些指標改由財務報表計算
+        def ttm(*names):
+            # 近四季合計；季資料不足時用最近一個年度
+            r = _row(qinc, *names)
+            if r is not None and len(r) >= 4:
+                return float(r.iloc[-4:].sum())
+            return last(inc, *names)
+
+        def latest_bs(*names):
+            v = last(qbs, *names)
+            return v if v is not None else last(bs, *names)
+
+        revenue = ttm("Total Revenue", "Operating Revenue")
+        gross = ttm("Gross Profit")
+        ni_last = ttm("Net Income", "Net Income Common Stockholders")
+        equity = latest_bs("Stockholders Equity", "Common Stock Equity")
+        debt = latest_bs("Total Debt")
+        shares_bs = latest_bs("Ordinary Shares Number", "Share Issued")
+        eps_ttm = float(q_eps.iloc[-4:].sum()) if q_eps is not None and len(q_eps) >= 4 else last(inc, "Diluted EPS", "Basic EPS")
+        # 沒有毛利、但有利息淨收入 → 銀行／保險等金融業
+        looks_financial = gross is None and last(inc, "Net Interest Income", "Interest Income") is not None
+
+        if not info and inc is None and bs is None:
+            raise ValueError(f"暫時抓不到 {sym} 的財報")   # 不快取，下次重試
+
         q_eps_growth = yoy(q_eps)
         if q_eps_growth is None:
             q_eps_growth = info.get("earningsQuarterlyGrowth") or info.get("earningsGrowth")
@@ -123,21 +162,24 @@ def get_fundamentals(sym):
             q_rev_growth = info.get("revenueGrowth")
 
         return {
-            "name": info.get("longName") or info.get("shortName") or sym,
-            "sector": info.get("sector"),
+            "name": info.get("longName") or info.get("shortName"),
+            "sector": info.get("sector") or ("Financial Services" if looks_financial else None),
             "industry": info.get("industry"),
+            "has_profile": bool(info.get("sector") or info.get("returnOnEquity") is not None),
             "currency": info.get("currency"),
             "financial_currency": info.get("financialCurrency"),
-            "roe": info.get("returnOnEquity"),
-            "debt_to_equity": (info["debtToEquity"] / 100) if info.get("debtToEquity") is not None else None,
-            "gross_margin": info.get("grossMargins"),
-            "net_margin": info.get("profitMargins"),
+            "roe": info.get("returnOnEquity") if info.get("returnOnEquity") is not None else ratio(ni_last, equity),
+            "debt_to_equity": (info["debtToEquity"] / 100) if info.get("debtToEquity") is not None else ratio(debt, equity),
+            "gross_margin": info.get("grossMargins") if info.get("grossMargins") is not None else ratio(gross, revenue),
+            "net_margin": info.get("profitMargins") if info.get("profitMargins") is not None else ratio(ni_last, revenue),
             "pe": info.get("trailingPE"),
             "forward_pe": info.get("forwardPE"),
             "pb": info.get("priceToBook"),
+            "eps_ttm": eps_ttm,
             "dividend_yield": info.get("dividendYield"),
-            "shares": info.get("sharesOutstanding") or info.get("impliedSharesOutstanding"),
-            "fcf_latest": info.get("freeCashflow"),
+            "shares": info.get("sharesOutstanding") or info.get("impliedSharesOutstanding") or shares_bs,
+            "book_per_share": ratio(equity, info.get("sharesOutstanding") or shares_bs),
+            "fcf_latest": info.get("freeCashflow") or last(cf, "Free Cash Flow"),
             "net_income": [float(x) for x in net_income] if net_income is not None else [],
             "fcf": [float(x) for x in fcf] if fcf is not None else [],
             "q_eps_growth": q_eps_growth,
@@ -365,15 +407,23 @@ def analyze(sym):
     try:
         fund = get_fundamentals(sym)
     except Exception:
-        fund = {"name": sym, "net_income": [], "fcf": []}
+        fund = {"net_income": [], "fcf": []}
 
     c = h["Close"]
     price, prev = c.iloc[-1], c.iloc[-2]
+    meta = h.attrs.get("meta", {})
+    fund = {**fund}   # 不改到快取
+    fund["name"] = fund.get("name") or meta.get("longName") or meta.get("shortName") or sym
+    fund["currency"] = fund.get("currency") or meta.get("currency")
+    if fund.get("pe") is None and (fund.get("eps_ttm") or 0) > 0:
+        fund["pe"] = price / fund["eps_ttm"]
+    if fund.get("pb") is None and (fund.get("book_per_share") or 0) > 0:
+        fund["pb"] = price / fund["book_per_share"]
     tech = minervini(h, bench, fund)
     buff = buffett(fund, price)
     return {
         "symbol": sym,
-        "name": fund.get("name", sym),
+        "name": fund["name"],
         "sector": fund.get("sector"),
         "currency": fund.get("currency"),
         "price": num(price, 2),
