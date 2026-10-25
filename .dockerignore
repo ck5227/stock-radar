@@ -2,3 +2,5 @@ data.json
 __pycache__/
 .git/
 .claude/
+alert_state.json
+.github/

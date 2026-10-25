@@ -75,6 +75,15 @@ button:disabled{opacity:.6;cursor:wait}
   .cards{grid-template-columns:repeat(4,1fr);gap:6px}
   .card{padding:8px}.card .n{font-size:20px}.card .badge{font-size:11px;padding:2px 4px}
 }
+.market{display:flex;gap:10px 24px;flex-wrap:wrap;padding:10px 20px;background:var(--panel);border-bottom:1px solid var(--line);font-size:13px}
+.market div{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.m-多頭{background:var(--pass)}.m-修正{background:var(--trim)}.m-空頭{background:var(--sell)}
+.bt-controls{display:flex;gap:10px;flex-wrap:wrap;align-items:center;padding:12px}
+.bt-cmp tr.best td{background:var(--accent-soft)}
+.tabs-sm{display:flex;gap:6px;padding:10px 12px;border-bottom:1px solid var(--line);flex-wrap:wrap}
+.tabs-sm button.on{background:var(--accent);border-color:var(--accent);color:#fff}
+.trades td,.trades th{font-size:12px;padding:5px 8px}
+.warn{background:var(--panel);border:1px solid var(--line);border-left:3px solid var(--trim);padding:10px 14px;border-radius:6px;font-size:13px;margin:0 0 16px;color:var(--muted)}
 .empty,.loading{padding:40px;text-align:center;color:var(--muted)}
 .err{color:var(--fail);font-size:12px}
 dialog{border:0;border-radius:12px;padding:0;width:min(960px,96vw);max-height:92vh;background:var(--panel);color:var(--ink);box-shadow:0 20px 60px rgba(0,0,0,.35)}
@@ -112,8 +121,10 @@ h3{font-size:14px;margin:14px 0 6px}
 <nav>
   <button data-tab="scan" class="on">選股</button>
   <button data-tab="hold">我的持股</button>
+  <button data-tab="bt">回測</button>
   <button data-tab="doc">說明</button>
 </nav>
+<div class="market" id="market"></div>
 <main>
   <section id="tab-scan">
     <div class="cards" id="scanCards"></div>
@@ -142,6 +153,18 @@ h3{font-size:14px;margin:14px 0 6px}
     </div>
   </section>
 
+  <section id="tab-bt" hidden>
+    <div class="panel" style="margin-bottom:16px">
+      <div class="bt-controls">
+        <label>回測股票 <select id="btScope"><option value="watchlist">選股清單</option><option value="holdings">我的持股</option></select></label>
+        <label>期間 <select id="btYears"><option value="3">近 3 年</option><option value="5" selected>近 5 年</option><option value="10">近 10 年</option></select></label>
+        <button class="primary" id="btRun">開始回測</button>
+        <span class="muted" id="btMsg" style="font-size:13px"></span>
+      </div>
+    </div>
+    <div id="btOut"></div>
+  </section>
+
   <section id="tab-doc" hidden>
     <div class="doc">
       <h2>怎麼判斷？</h2>
@@ -150,6 +173,8 @@ h3{font-size:14px;margin:14px 0 6px}
         <li><b>趨勢面（Mark Minervini）——現在是不是好時機？</b><br>股價是否站上 50／150／200 日均線、均線多頭排列、接近 52 週高點、走勢強過大盤，以及是否帶量突破近期高點。</li>
         <li><b>基本面（Warren Buffett）——這家公司值不值得擁有？</b><br>ROE、毛利率、淨利率、負債比、自由現金流、獲利是否穩定成長，並用現金流折現估算內在價值。</li>
       </ul>
+      <h3>大盤方向</h3>
+      <p>約四分之三的股票跟著大盤走。頁面上方顯示台股加權指數與美股 S&amp;P 500 的狀態：<b>多頭</b>（在 50 與 200 日線之上）照常判斷；<b>修正</b>（跌破 50 日線或 200 日線走平）時「強力買進」降為「買進」；<b>空頭</b>（跌破 200 日線）時所有買進降為「觀察」、持股不加碼。</p>
       <h3>選股建議</h3>
       <table>
         <tr><td><span class="badge a-強力買進">強力買進</span></td><td>趨勢正在買點，而且是優質企業（兩者都同意）</td></tr>
@@ -365,6 +390,69 @@ function notifyChanges() {
   try { localStorage.setItem("holdActions", JSON.stringify(now)); } catch {}
 }
 
+// ---------- 大盤
+async function loadMarket() {
+  const m = await api("/api/market");
+  $("#market").innerHTML = m.map(x => x.error ? `<div class="muted">${esc(x.name)}：暫時抓不到</div>` :
+    `<div><b>${esc(x.name)}</b> ${fmt(x.price)} <span class="${cls(x.change)}">${pct(x.change, 2)}</span>
+     <span class="badge m-${x.status}" style="min-width:0">${x.status}</span><span class="muted">${esc(x.note)}</span></div>`).join("");
+}
+
+// ---------- 回測
+const MODES = {short: "短線", mid: "中線", long: "長線"};
+const MODE_DESC = {short: "跌破 50 日線、從高點回落 15% 或急漲 25% 就出場（與持股建議的減碼規則相同）",
+  mid: "帶量跌破 50 日線或跌破 200 日線才出場", long: "只在跌破 200 日線時出場"};
+let bt = null, btMode = "short";
+$("#btRun").onclick = async () => {
+  const symbols = state.data[$("#btScope").value];
+  if (!symbols.length) { $("#btMsg").textContent = "清單是空的，先加入股票"; return; }
+  const years = +$("#btYears").value;
+  $("#btRun").disabled = true;
+  $("#btMsg").textContent = `正在回測 ${symbols.length} 檔股票、三種出場風格（第一次約需 30–90 秒）…`;
+  try {
+    const runs = await Promise.all(Object.keys(MODES).map(mode => api("/api/backtest", {symbols, years, mode})));
+    bt = Object.fromEntries(runs.map(r => [r.mode, r]));
+    $("#btMsg").textContent = "";
+    renderBt();
+  } catch (e) { $("#btMsg").textContent = "回測失敗：" + e.message; }
+  $("#btRun").disabled = false;
+};
+function renderBt() {
+  const keys = Object.keys(MODES), s0 = bt.short.summary;
+  const best = keys.reduce((a, k) => (bt[k].summary.avg_strategy_return ?? -9) > (bt[a].summary.avg_strategy_return ?? -9) ? k : a, "short");
+  const row = k => { const s = bt[k].summary; return `<tr class="${k === best ? "best" : ""}"><td class="l"><b>${MODES[k]}</b>${k === best ? " ★" : ""}</td><td>${s.n}</td><td>${pct(s.win_rate, 0)}</td>
+    <td class="up">${pct(s.avg_win)}</td><td class="down">${pct(s.avg_loss)}</td><td class="${cls(s.expectancy)}">${pct(s.expectancy)}</td>
+    <td class="${cls(s.avg_strategy_return)}">${pct(s.avg_strategy_return, 0)}</td><td>${s.beat_buy_hold}/${s.stocks}</td><td>${pct(s.avg_exposure, 0)}</td></tr>`; };
+  const tradeRows = r => r.trades.length
+    ? r.trades.slice().reverse().map(t => `<tr><td class="l">${t.entry_date}</td><td>${fmt(t.entry)}</td><td class="l">${t.exit_date}</td><td>${fmt(t.exit)}</td><td class="${cls(t.ret)}">${pct(t.ret)}</td><td>${t.days}</td><td class="l">${esc(t.reason)}</td></tr>`).join("")
+    : '<tr><td colspan="7" class="muted l">這段期間沒有出現買點</td></tr>';
+  $("#btOut").innerHTML = `
+    <div class="panel" style="margin-bottom:16px">
+      <div class="toolbar"><b>三種出場風格比較</b><span class="muted" style="font-size:12px">${s0.stocks} 檔股票・近 ${bt.short.years} 年・已扣交易成本</span></div>
+      <div class="scroll"><table class="bt-cmp"><thead><tr><th class="l">出場風格</th><th>交易次數</th><th>勝率</th><th>平均賺</th><th>平均賠</th><th>每筆期望值</th><th>平均總報酬</th><th>贏過買進持有</th><th>持股時間</th></tr></thead>
+      <tbody>${keys.map(row).join("")}
+      <tr><td class="l muted">對照：買進後一直持有</td><td colspan="5"></td><td class="${cls(s0.avg_buy_hold_return)}">${pct(s0.avg_buy_hold_return, 0)}</td><td></td><td>100%</td></tr>
+      <tr><td class="l muted">對照：同期大盤</td><td colspan="5"></td><td class="${cls(s0.avg_index_return)}">${pct(s0.avg_index_return, 0)}</td><td></td><td>100%</td></tr></tbody></table></div>
+    </div>
+    <div class="warn">
+      <b>怎麼看：</b>「每筆期望值」為正，代表規則長期平均是賺的；勝率不到五成也可能賺錢，關鍵在「平均賺」遠大於「平均賠」。<br>
+      <b>限制：</b>只回測趨勢面與大盤方向，Buffett 基本面因沒有歷史財報無法回測；清單裡多半是「現在還在、而且漲很多」的股票（倖存者偏差），會讓「買進持有」看起來特別好；過去的表現不代表未來。
+    </div>
+    <div class="panel">
+      <div class="tabs-sm">${keys.map(k => `<button data-m="${k}" class="${k === btMode ? "on" : ""}">${MODES[k]}</button>`).join("")}
+        <span class="muted" style="font-size:12px;align-self:center">${MODE_DESC[btMode]}・點股票看每筆交易</span></div>
+      <div class="scroll"><table id="btTable"></table></div>
+    </div>`;
+  document.querySelectorAll(".tabs-sm [data-m]").forEach(b => b.onclick = () => { btMode = b.dataset.m; renderBt(); });
+  $("#btTable").innerHTML = `<thead><tr><th class="l">股票</th><th>交易次數</th><th>勝率</th><th>每筆期望值</th><th>最差一筆</th><th>策略報酬</th><th>買進持有</th><th>持股時間</th></tr></thead><tbody>` +
+    bt[btMode].results.map(r => r.error ? `<tr><td class="l sym">${esc(r.symbol)}</td><td colspan="7" class="l err">${esc(r.error)}</td></tr>` :
+      `<tr data-bt="${esc(r.symbol)}" style="cursor:pointer"><td class="l sym">${esc(r.symbol)}</td><td>${r.n}</td><td>${pct(r.win_rate, 0)}</td>
+      <td class="${cls(r.expectancy)}">${pct(r.expectancy)}</td><td class="down">${pct(r.worst)}</td>
+      <td class="${cls(r.strategy_return)}">${pct(r.strategy_return, 0)}</td><td class="${cls(r.buy_hold_return)}">${pct(r.buy_hold_return, 0)}</td><td>${pct(r.exposure, 0)}</td></tr>
+      <tr hidden data-tr="${esc(r.symbol)}"><td colspan="8" style="padding:0 8px 10px"><table class="trades"><thead><tr><th class="l">買進日</th><th>買價</th><th class="l">賣出日</th><th>賣價</th><th>報酬</th><th>天數</th><th class="l">出場原因</th></tr></thead><tbody>${tradeRows(r)}</tbody></table></td></tr>`).join("") + "</tbody>";
+  document.querySelectorAll("[data-bt]").forEach(tr => tr.onclick = () => { const d = document.querySelector(`[data-tr="${tr.dataset.bt}"]`); d.hidden = !d.hidden; });
+}
+
 // ---------- 更新
 async function loadScan() {
   if (!state.scan.length) $("#scanTable").innerHTML = '<tbody><tr><td class="loading">正在下載股價與財報，第一次約需 30–60 秒…</td></tr></tbody>';
@@ -373,7 +461,7 @@ async function loadScan() {
 async function loadHoldings() { state.holdings = await api("/api/analyze", {symbols: state.data.holdings}); renderHold(); notifyChanges(); }
 async function refreshAll() {
   $("#refreshBtn").disabled = true; $("#updated").textContent = "更新中…";
-  try { await Promise.all([loadScan(), loadHoldings()]); $("#updated").textContent = "更新於 " + new Date().toLocaleTimeString(); }
+  try { await Promise.all([loadScan(), loadHoldings(), loadMarket().catch(() => {})]); $("#updated").textContent = "更新於 " + new Date().toLocaleTimeString(); }
   catch (e) { $("#updated").textContent = "更新失敗：" + e.message; }
   $("#refreshBtn").disabled = false;
   nextAt = Date.now() + state.data.settings.refresh_min * 60000;

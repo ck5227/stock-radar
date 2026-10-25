@@ -43,11 +43,18 @@ def normalize_symbol(s):
     s = s.strip().upper()
     if s.isdigit():          # 台股只輸入代號時預設上市
         s += ".TW"
+    elif s in ("BRKB", "BRKA"):
+        s = s[:3] + "-" + s[3]
+    elif "." in s and not s.endswith((".TW", ".TWO")) and len(s.rsplit(".", 1)[1]) == 1:
+        s = s.replace(".", "-")   # 美股類股代號：BRK.B → Yahoo 的 BRK-B
     return s
 
 
 def benchmark_for(sym):
     return "^TWII" if sym.endswith((".TW", ".TWO")) else "^GSPC"
+
+
+INDEX_NAMES = {"^TWII": "台股加權指數", "^GSPC": "美股 S&P 500"}
 
 
 # ---------------------------------------------------------------- 資料抓取
@@ -411,6 +418,10 @@ def analyze(sym):
 
     c = h["Close"]
     price, prev = c.iloc[-1], c.iloc[-2]
+    try:
+        mkt = market_status(benchmark_for(sym))
+    except Exception:
+        mkt = None
     meta = h.attrs.get("meta", {})
     fund = {**fund}   # 不改到快取
     fund["name"] = fund.get("name") or meta.get("longName") or meta.get("shortName") or sym
@@ -432,8 +443,9 @@ def analyze(sym):
         "pe": num(fund.get("pe"), 2),
         "minervini": tech,
         "buffett": buff,
-        "advice": buy_advice(tech, buff),
-        "hold": hold_advice(h, tech, buff),
+        "market": mkt,
+        "advice": buy_advice(tech, buff, mkt),
+        "hold": hold_advice(h, tech, buff, mkt),
     }
 
 
@@ -453,10 +465,35 @@ def chart_data(sym, days=260):
     }
 
 
+# ---------------------------------------------------------------- 大盤方向
+
+def market_status(index_sym):
+    """大盤多空：約四分之三的個股跟著大盤走，空頭時不進場。
+    多頭：指數在 50 日與 200 日線之上且 200 日線上揚；修正：仍在 200 日線上；空頭：跌破 200 日線。"""
+    h = get_history(index_sym)
+    c = h["Close"]
+    last = c.iloc[-1]
+    ma50, ma200 = c.rolling(50).mean(), c.rolling(200).mean()
+    m50, m200, m200_1m = ma50.iloc[-1], ma200.iloc[-1], ma200.iloc[-22]
+    if last > m200 and last > m50 and m200 > m200_1m:
+        status, note = "多頭", "指數在 50 日與 200 日均線之上，適合進場"
+    elif last > m200:
+        status, note = "修正", "指數跌破 50 日均線或 200 日線走平，進場要更挑剔"
+    else:
+        status, note = "空頭", "指數跌破 200 日均線，暫停買進"
+    return {
+        "symbol": index_sym, "name": INDEX_NAMES.get(index_sym, index_sym),
+        "status": status, "note": note,
+        "price": num(last, 2), "change": num(last / c.iloc[-2] - 1),
+        "ma50": num(m50, 2), "ma200": num(m200, 2),
+        "date": h.index[-1].strftime("%Y-%m-%d"),
+    }
+
+
 # ---------------------------------------------------------------- 綜合建議
 # 趨勢面（Minervini）決定「時機」，基本面（Buffett）決定「值不值得」，兩者合併成單一建議。
 
-def buy_advice(t, b):
+def buy_advice(t, b, mkt=None):
     """選股：強力買進 / 買進 / 觀察 / 避開。"""
     q = b["quality"] if b["quality"] is not None else 0.5
     good, cheap = q >= 0.7, b["candidate"]
@@ -489,10 +526,18 @@ def buy_advice(t, b):
         action = "避開"
     else:
         action = "觀察"
+
+    status = mkt["status"] if mkt else None
+    if status == "空頭" and action in ("強力買進", "買進"):
+        action = "觀察"
+        reasons.append(f"{mkt['name']}為空頭（跌破 200 日線），暫不進場")
+    elif status == "修正" and action == "強力買進":
+        action = "買進"
+        reasons.append(f"{mkt['name']}修正中，建議降一級")
     return {"action": action, "reasons": reasons}
 
 
-def hold_advice(h, t, b):
+def hold_advice(h, t, b, mkt=None):
     """持股：賣出 / 減碼 / 續抱 / 加碼（不需要成本或買進日期）。"""
     c, v = h["Close"], h["Volume"]
     price = c.iloc[-1]
@@ -535,6 +580,8 @@ def hold_advice(h, t, b):
         action, reasons = "減碼", sell + trim
         if good and sell:
             reasons.append("但仍是優質企業，可先減碼觀察")
+    elif add and mkt and mkt["status"] == "空頭":
+        action, reasons = "續抱", add + [f"但{mkt['name']}為空頭，暫不加碼"]
     elif add:
         action, reasons = "加碼", add
     else:

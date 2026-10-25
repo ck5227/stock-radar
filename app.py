@@ -10,6 +10,7 @@ from concurrent.futures import ThreadPoolExecutor
 from flask import Flask, jsonify, request, send_from_directory
 
 import analysis
+import backtest
 
 BASE = os.path.dirname(os.path.abspath(__file__))
 LEGACY_FILE = os.path.join(BASE, "data.json")   # 舊版存檔，只用來帶入初始清單
@@ -74,6 +75,25 @@ def analyze_many():
     for i, r in enumerate(ranked):
         r["minervini"]["rs_rank"] = round(1 + 98 * i / max(len(ranked) - 1, 1))
     return jsonify(results)
+
+
+@app.get("/api/market")
+def market():
+    out = []
+    for idx in ("^TWII", "^GSPC"):
+        try:
+            out.append(analysis.market_status(idx))
+        except Exception as e:
+            out.append({"symbol": idx, "name": analysis.INDEX_NAMES[idx], "error": str(e)})
+    return jsonify(out)
+
+
+@app.post("/api/backtest")
+def run_backtest():
+    body = request.json or {}
+    years = min(max(int(body.get("years", 5)), 1), 12)
+    mode = body.get("mode") if body.get("mode") in backtest.MODES else "short"
+    return jsonify(backtest.run(clean_symbols(body.get("symbols", [])), years, _pool, mode))
 
 
 @app.get("/api/stock/<sym>")
