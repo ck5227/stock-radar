@@ -38,7 +38,7 @@ python app.py
 | `app.py` | Flask 伺服器與 API |
 | `static/index.html` | 網頁介面 |
 
-觀察清單與持股存在 `data.json`（已列入 `.gitignore`，不會上傳）。
+觀察清單與持股存在你自己的瀏覽器裡（舊版的 `data.json` 會在第一次開啟時自動帶入）。
 
 ## 限制
 

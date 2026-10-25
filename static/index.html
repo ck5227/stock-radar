@@ -249,8 +249,17 @@ function bindRows(table, kind) {
     await saveList(kind, state.data[kind].filter(s => s !== rm && s + "O" !== rm));
   });
 }
+// 觀察清單與持股只存在這個瀏覽器（localStorage），不同使用者互不影響
+const STORE = "stockRadar";
+function persist() { try { localStorage.setItem(STORE, JSON.stringify(state.data)); } catch {} }
+async function loadData() {
+  let saved = null;
+  try { saved = JSON.parse(localStorage.getItem(STORE) || "null"); } catch {}
+  const base = saved || await api("/api/defaults");
+  return {watchlist: base.watchlist || [], holdings: base.holdings || [], settings: {refresh_min: 5, ...(base.settings || {})}};
+}
 async function saveList(kind, list) {
-  state.data = await api("/api/" + kind, {[kind]: list});
+  state.data[kind] = list; persist();
   kind === "watchlist" ? await loadScan() : await loadHoldings();
 }
 // 只分析新加入的股票，不重抓整份清單；完成後捲到該列並標亮
@@ -263,7 +272,7 @@ async function addSymbols(kind, raw, msg, btn) {
   msg.textContent = `正在查詢 ${fresh.join("、")}…`;
   const results = await Promise.all(fresh.map(s => api("/api/stock/" + encodeURIComponent(s))));
   const good = results.filter(r => !r.error), bad = fresh.filter((_, i) => results[i].error);
-  if (good.length) state.data = await api("/api/" + kind, {[kind]: [...state.data[kind], ...good.map(r => r.symbol)]});
+  if (good.length) { state.data[kind] = [...state.data[kind], ...good.map(r => r.symbol)]; persist(); }
   const rows = kind === "watchlist" ? state.scan : state.holdings;
   good.forEach(r => { delete r.chart; rows.push(r); });
   kind === "watchlist" ? renderScan() : (renderHold(), notifyChanges());
@@ -359,9 +368,9 @@ function notifyChanges() {
 // ---------- 更新
 async function loadScan() {
   if (!state.scan.length) $("#scanTable").innerHTML = '<tbody><tr><td class="loading">正在下載股價與財報，第一次約需 30–60 秒…</td></tr></tbody>';
-  state.scan = await api("/api/scan"); renderScan();
+  state.scan = await api("/api/analyze", {symbols: state.data.watchlist}); renderScan();
 }
-async function loadHoldings() { state.holdings = await api("/api/holdings"); renderHold(); notifyChanges(); }
+async function loadHoldings() { state.holdings = await api("/api/analyze", {symbols: state.data.holdings}); renderHold(); notifyChanges(); }
 async function refreshAll() {
   $("#refreshBtn").disabled = true; $("#updated").textContent = "更新中…";
   try { await Promise.all([loadScan(), loadHoldings()]); $("#updated").textContent = "更新於 " + new Date().toLocaleTimeString(); }
@@ -376,10 +385,10 @@ setInterval(() => {
   if (s === 0 && !document.hidden && !$("#refreshBtn").disabled) refreshAll();
 }, 1000);
 $("#refreshBtn").onclick = refreshAll;
-$("#refreshMin").onchange = async e => { state.data = await api("/api/settings", {refresh_min: e.target.value}); nextAt = Date.now() + state.data.settings.refresh_min * 60000; };
+$("#refreshMin").onchange = e => { state.data.settings.refresh_min = Math.min(Math.max(parseInt(e.target.value) || 5, 1), 120); persist(); nextAt = Date.now() + state.data.settings.refresh_min * 60000; };
 
 (async () => {
-  state.data = await api("/api/data");
+  state.data = await loadData(); persist();
   $("#refreshMin").value = state.data.settings.refresh_min;
   if (window.Notification?.permission === "granted") $("#notifyBtn").textContent = "🔔 通知已開啟";
   refreshAll();
