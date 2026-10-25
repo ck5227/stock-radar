@@ -60,6 +60,21 @@ tbody tr[data-s]:hover{background:var(--accent-soft);cursor:pointer}
 @keyframes flash{from{background:var(--accent-soft);box-shadow:inset 4px 0 0 var(--accent)}to{background:transparent}}
 tr.flash{animation:flash 2.5s ease-out}
 button:disabled{opacity:.6;cursor:wait}
+.m-chg{display:none}
+/* 手機：每檔股票排成兩行卡片——代號、股價、建議、移除；下一行是理由 */
+@media (max-width:640px){
+  #scanTable thead,#holdTable thead{display:none}
+  #scanTable tr,#holdTable tr{display:grid;grid-template-columns:1fr auto auto auto;align-items:center;column-gap:6px;padding:8px 4px;border-bottom:1px solid var(--line)}
+  #scanTable td,#holdTable td{border:0;padding:2px 4px}
+  .c-chg,.c-x2{display:none}
+  .m-chg{display:block;font-size:11px}
+  .c-rm{order:1}
+  td.why{order:2;grid-column:1/-1;min-width:0;font-size:12px}
+  .badge{min-width:0;padding:3px 8px;font-size:13px}
+  .nm{max-width:150px}
+  .cards{grid-template-columns:repeat(4,1fr);gap:6px}
+  .card{padding:8px}.card .n{font-size:20px}.card .badge{font-size:11px;padding:2px 4px}
+}
 .empty,.loading{padding:40px;text-align:center;color:var(--muted)}
 .err{color:var(--fail);font-size:12px}
 dialog{border:0;border-radius:12px;padding:0;width:min(960px,96vw);max-height:92vh;background:var(--panel);color:var(--ink);box-shadow:0 20px 60px rgba(0,0,0,.35)}
@@ -177,7 +192,7 @@ const api = (u, body) => fetch(u, body ? {method:"POST", headers:{"Content-Type"
 const norm = s => /^\d+$/.test(s) ? s + ".TW" : s.toUpperCase();
 const badge = a => `<span class="badge a-${a}">${a}</span>`;
 const stockCell = r => `<td class="l"><span class="sym">${esc(r.symbol)}</span><span class="nm">${esc(r.name)}</span></td>`;
-const priceCells = r => `<td>${fmt(r.price)}</td><td class="${cls(r.change)}">${pct(r.change, 2)}</td>`;
+const priceCells = r => `<td class="c-px">${fmt(r.price)}<span class="m-chg ${cls(r.change)}">${pct(r.change, 2)}</span></td><td class="c-chg ${cls(r.change)}">${pct(r.change, 2)}</td>`;
 const valuation = b => b.margin_of_safety == null ? "–" : b.margin_of_safety >= 0 ? "便宜 " + pct(b.margin_of_safety, 0) : b.margin_of_safety >= -1 ? "偏貴 " + pct(-b.margin_of_safety, 0) : `貴 ${(1 - b.margin_of_safety).toFixed(1)} 倍`;
 
 document.querySelectorAll("nav button").forEach(b => b.onclick = () => {
@@ -199,14 +214,14 @@ function renderScan() {
       || (b.minervini?.tt_pass ?? 0) - (a.minervini?.tt_pass ?? 0));
   $("#scanTable").innerHTML = `<thead><tr><th class="l">股票</th><th>股價</th><th>漲跌</th><th class="l">建議</th><th class="l">理由</th><th>趨勢</th><th>體質</th><th>估值</th><th></th></tr></thead><tbody>` +
     (rows.length ? rows.map(r => r.error
-      ? `<tr><td class="l sym">${esc(r.symbol)}</td><td colspan="7" class="l err">${esc(r.error)}</td><td><button class="x" data-rm="${esc(r.symbol)}" title="移除">✕</button></td></tr>`
+      ? `<tr><td class="l sym">${esc(r.symbol)}</td><td colspan="7" class="l err">${esc(r.error)}</td><td class="c-rm"><button class="x" data-rm="${esc(r.symbol)}" title="移除">✕</button></td></tr>`
       : `<tr data-s="${esc(r.symbol)}">${stockCell(r)}${priceCells(r)}
-        <td class="l">${badge(r.advice.action)}</td>
+        <td class="l c-act">${badge(r.advice.action)}</td>
         <td class="why">${r.advice.reasons.map(esc).join("；")}</td>
-        <td>${r.minervini.tt_pass}/8</td>
-        <td>${r.buffett.quality == null ? "–" : Math.round(r.buffett.quality * 100) + " 分"}</td>
-        <td class="${cls(r.buffett.margin_of_safety)}">${valuation(r.buffett)}</td>
-        <td><button class="x" data-rm="${esc(r.symbol)}" title="移除">✕</button></td></tr>`).join("")
+        <td class="c-x2">${r.minervini.tt_pass}/8</td>
+        <td class="c-x2">${r.buffett.quality == null ? "–" : Math.round(r.buffett.quality * 100) + " 分"}</td>
+        <td class="c-x2 ${cls(r.buffett.margin_of_safety)}">${valuation(r.buffett)}</td>
+        <td class="c-rm"><button class="x" data-rm="${esc(r.symbol)}" title="移除">✕</button></td></tr>`).join("")
       : `<tr><td colspan="9" class="empty">沒有符合的股票</td></tr>`) + "</tbody>";
   bindRows("#scanTable", "watchlist");
 }
@@ -221,9 +236,9 @@ function renderHold() {
     ? `<tbody><tr><td class="empty">還沒有持股。在上方輸入你持有的股票代號，例如 2330。</td></tr></tbody>`
     : `<thead><tr><th class="l">股票</th><th>股價</th><th>漲跌</th><th class="l">建議</th><th class="l">理由</th><th></th></tr></thead><tbody>` +
       rows.map(r => r.error
-        ? `<tr><td class="l sym">${esc(r.symbol)}</td><td colspan="4" class="l err">${esc(r.error)}</td><td><button class="x" data-rm="${esc(r.symbol)}">✕</button></td></tr>`
-        : `<tr data-s="${esc(r.symbol)}">${stockCell(r)}${priceCells(r)}<td class="l">${badge(r.hold.action)}</td>
-          <td class="why">${r.hold.reasons.map(esc).join("；")}</td><td><button class="x" data-rm="${esc(r.symbol)}" title="移除">✕</button></td></tr>`).join("") + "</tbody>";
+        ? `<tr><td class="l sym">${esc(r.symbol)}</td><td colspan="4" class="l err">${esc(r.error)}</td><td class="c-rm"><button class="x" data-rm="${esc(r.symbol)}">✕</button></td></tr>`
+        : `<tr data-s="${esc(r.symbol)}">${stockCell(r)}${priceCells(r)}<td class="l c-act">${badge(r.hold.action)}</td>
+          <td class="why">${r.hold.reasons.map(esc).join("；")}</td><td class="c-rm"><button class="x" data-rm="${esc(r.symbol)}" title="移除">✕</button></td></tr>`).join("") + "</tbody>";
   bindRows("#holdTable", "holdings");
 }
 
