@@ -14,6 +14,12 @@ python app.py
 
 開啟 <http://127.0.0.1:5057>。Windows 也可以直接雙擊 `start.bat`。
 
+### 部署到雲端（Render 免費方案）
+
+[![Deploy to Render](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy?repo=https://github.com/ck5227/stock-radar)
+
+按上方按鈕、用 GitHub 帳號登入 Render，確認方案為 Free 後按 Deploy。免費方案閒置 15 分鐘會休眠，再次開啟約需 1 分鐘喚醒。
+
 ## 使用方式
 
 1. **選股**分頁：輸入代號按「加入」，或從「一次加入一組」選台股權值股／美股科技股／巴菲特持股。台股輸入數字即可（例如 `2330`，上市／上櫃自動判斷），美股輸入英文代號（例如 `AAPL`）。

@@ -1,0 +1,8 @@
+# Render 一鍵部署設定：https://render.com/deploy?repo=https://github.com/ck5227/stock-radar
+services:
+  - type: web
+    name: stock-radar
+    runtime: docker
+    plan: free
+    healthCheckPath: /
+    autoDeploy: true
