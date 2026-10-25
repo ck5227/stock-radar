@@ -85,7 +85,11 @@ def market():
             out.append(analysis.market_status(idx))
         except Exception as e:
             out.append({"symbol": idx, "name": analysis.INDEX_NAMES[idx], "error": str(e)})
-    return jsonify(out)
+    try:
+        ai = analysis.ai_watch()
+    except Exception as e:
+        ai = {"name": "AI 族群", "error": str(e)}
+    return jsonify({"indexes": out, "ai": ai})
 
 
 @app.post("/api/backtest")

@@ -78,6 +78,7 @@ button:disabled{opacity:.6;cursor:wait}
 .market{display:flex;gap:10px 24px;flex-wrap:wrap;padding:10px 20px;background:var(--panel);border-bottom:1px solid var(--line);font-size:13px}
 .market div{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
 .m-多頭{background:var(--pass)}.m-修正{background:var(--trim)}.m-空頭{background:var(--sell)}
+.m-正常{background:var(--pass)}.m-注意{background:var(--trim)}.m-警戒{background:#d9480f}.m-危險{background:var(--sell)}
 .bt-controls{display:flex;gap:10px;flex-wrap:wrap;align-items:center;padding:12px}
 .bt-cmp tr.best td{background:var(--accent-soft)}
 .tabs-sm{display:flex;gap:6px;padding:10px 12px;border-bottom:1px solid var(--line);flex-wrap:wrap}
@@ -183,6 +184,8 @@ h3{font-size:14px;margin:14px 0 6px}
       </ul>
       <h3>大盤方向</h3>
       <p>約四分之三的股票跟著大盤走。頁面上方顯示台股加權指數與美股 S&amp;P 500 的狀態：<b>多頭</b>（在 50 與 200 日線之上）照常判斷；<b>修正</b>（跌破 50 日線或 200 日線走平）時「強力買進」降為「買進」；<b>空頭</b>（跌破 200 日線）時所有買進降為「觀察」、持股不加碼。</p>
+      <h3>AI 泡沫警示</h3>
+      <p>沒有人能預測泡沫何時破裂。這裡追蹤破裂時通常會先出現的訊號：費城半導體指數與 6 檔 AI 龍頭（NVDA、AVGO、AMD、TSM、MU、台積電）的均線位置。<b>正常</b>：都在均線之上；<b>注意</b>：費半或過半龍頭跌破 50 日線；<b>警戒</b>：費半或過半龍頭跌破 200 日線；<b>危險</b>：費半跌破 200 日線、均線下彎且離高點跌超過 25%。等級改變時會推播到手機。</p>
       <h3>短線與長線</h3>
       <p>每檔股票同時給兩種建議。<b>短線</b>以 Minervini 的買點與停損為主，回測中持有中位數約 3–4 週、賺錢的部位約 2 個月；<b>長線</b>以 Buffett 的公司品質為主、只用 200 日線把關趨勢，持有中位數約 6 個月、賺錢的部位約 11 個月。長線不因一般回檔或估值偏高就減碼，只在跌破 200 日線或基本面轉弱時動作。</p>
       <h3>選股建議（短線）</h3>
@@ -422,10 +425,13 @@ function notifyChanges() {
 
 // ---------- 大盤
 async function loadMarket() {
-  const m = await api("/api/market");
-  $("#market").innerHTML = m.map(x => x.error ? `<div class="muted">${esc(x.name)}：暫時抓不到</div>` :
+  const m = await api("/api/market"), ai = m.ai;
+  $("#market").innerHTML = m.indexes.map(x => x.error ? `<div class="muted">${esc(x.name)}：暫時抓不到</div>` :
     `<div><b>${esc(x.name)}</b> ${fmt(x.price)} <span class="${cls(x.change)}">${pct(x.change, 2)}</span>
-     <span class="badge m-${x.status}" style="min-width:0">${x.status}</span><span class="muted">${esc(x.note)}</span></div>`).join("");
+     <span class="badge m-${x.status}" style="min-width:0">${x.status}</span><span class="muted">${esc(x.note)}</span></div>`).join("") +
+    (ai.error ? "" : `<div title="${esc(ai.members.map(s => `${s.symbol} 距高點 -${Math.round(s.drawdown * 100)}%`).join("、"))}"><b>AI 泡沫警示</b>
+     <span class="badge m-${ai.level}" style="min-width:0">${ai.level}</span>
+     <span class="muted">${esc(ai.note)}（費半距高點 -${Math.round(ai.drawdown * 100)}%，${ai.count} 檔 AI 龍頭中 ${ai.below200} 檔跌破 200 日線）</span></div>`);
 }
 
 // ---------- 回測

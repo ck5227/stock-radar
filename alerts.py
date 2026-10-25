@@ -8,6 +8,7 @@
   觀察清單：建議變成「強力買進／買進」
 短線與長線分開追蹤；STYLE=short 或 long 可只收其中一種（預設 both 兩種都收）。
 同一檔股票的同一個建議，一天最多通知一次（盤中訊號可能來回變動）。
+另外追蹤「AI 泡沫警示」等級（正常／注意／警戒／危險），等級改變就通知。
 """
 import datetime as dt
 import json
@@ -19,6 +20,7 @@ import analysis
 STATE_FILE = "alert_state.json"
 HOLD_ALERT = {"賣出": ("rotating_light", 5), "減碼": ("warning", 4), "加碼": ("chart_with_upwards_trend", 4)}
 BUY_ALERT = {"強力買進": ("star", 4), "買進": ("moneybag", 3)}
+AI_TAGS = {"正常": ("green_circle", 3), "注意": ("yellow_circle", 3), "警戒": ("orange_circle", 4), "危險": ("red_circle", 5)}
 VIEWS = {"short": ("短線", "hold", "advice"), "long": ("長線", "hold_long", "advice_long")}
 
 
@@ -82,8 +84,24 @@ def main():
             label, _, buy_key = VIEWS[v]
             check("W", a["symbol"], a[buy_key]["action"], a[buy_key]["reasons"], BUY_ALERT, label)
 
+    # AI 泡沫警示：等級改變就通知（含回到正常）
+    try:
+        ai = analysis.ai_watch()
+        prev_ai = state.get("ai_level")
+        state_ai = ai["level"]
+        if prev_ai and prev_ai != state_ai:
+            worse = analysis.AI_LEVELS.index(state_ai) > analysis.AI_LEVELS.index(prev_ai)
+            push(topic, f"AI 泡沫警示：{prev_ai} → {state_ai}" + ("（轉弱）" if worse else "（好轉）"),
+                 f"{ai['note']}。費半距高點 -{ai['drawdown'] * 100:.0f}%，{ai['count']} 檔 AI 龍頭中 {ai['below200']} 檔跌破 200 日線。",
+                 *AI_TAGS[state_ai], url)
+            print("已通知 AI 警示", prev_ai, "→", state_ai)
+    except Exception as e:
+        print("AI 警示失敗：", e)
+        state_ai = state.get("ai_level")
+
     if first_run:
         push(topic, "選股雷達通知已啟用", "目前持股：" + ("；".join(summary) or "無") +
+             (f"\nAI 泡沫警示：{state_ai}" if state_ai else "") +
              "\n之後建議改變時會通知你。", "white_check_mark", 3, url)
     for sym, label, action, reasons, tag, priority in alerts:
         kind = "持股" if action in HOLD_ALERT else "買點"
@@ -91,7 +109,8 @@ def main():
         print("已通知", sym, label, action)
 
     with open(STATE_FILE, "w", encoding="utf-8") as f:
-        json.dump({"actions": actions, "notified": notified, "updated": dt.datetime.now().isoformat()}, f, ensure_ascii=False)
+        json.dump({"actions": actions, "notified": notified, "ai_level": state_ai,
+                   "updated": dt.datetime.now().isoformat()}, f, ensure_ascii=False)
     print(f"檢查完成：{len(actions)} 項建議，通知 {len(alerts)} 則")
 
 

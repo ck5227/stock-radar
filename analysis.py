@@ -671,3 +671,51 @@ def hold_advice_long(h, t, b, mkt=None):
             if pricey:
                 reasons.append("估值偏高（超過內在價值 2 倍），續抱但不加碼")
     return {"action": action, "reasons": reasons}
+
+
+# ---------------------------------------------------------------- AI 族群警示
+# 沒有人能預測泡沫何時破，這裡只追蹤「泡沫破裂時通常會先出現」的訊號：
+# 費城半導體指數與 AI 龍頭股跌破長期均線、從高點大幅回落。
+
+AI_INDEX = "^SOX"
+AI_BASKET = ["NVDA", "AVGO", "AMD", "TSM", "MU", "2330.TW"]
+AI_LEVELS = ["正常", "注意", "警戒", "危險"]
+
+
+def ai_watch():
+    h = get_history(AI_INDEX)
+    c = h["Close"]
+    last = c.iloc[-1]
+    ma50, ma200 = c.rolling(50).mean(), c.rolling(200).mean()
+    m50, m200, m200_1m = ma50.iloc[-1], ma200.iloc[-1], ma200.iloc[-22]
+    drawdown = 1 - last / h["High"].iloc[-252:].max()
+
+    below50 = below200 = 0
+    members = []
+    for sym in AI_BASKET:
+        try:
+            s = get_history(sym)["Close"]
+        except Exception:
+            continue
+        p, s50, s200 = s.iloc[-1], s.rolling(50).mean().iloc[-1], s.rolling(200).mean().iloc[-1]
+        below50 += p < s50
+        below200 += p < s200
+        members.append({"symbol": sym, "below50": bool(p < s50), "below200": bool(p < s200),
+                        "drawdown": num(1 - p / s.iloc[-252:].max())})
+    n = max(len(members), 1)
+
+    if last < m200 and m200 < m200_1m and drawdown >= 0.25:
+        level, note = "危險", "費半跌破 200 日線且均線下彎、離高點跌超過 25%，過去泡沫破裂時多是這種走勢"
+    elif last < m200 or below200 / n >= 0.5:
+        level, note = "警戒", "費半或過半 AI 龍頭跌破 200 日線，長期趨勢可能轉弱"
+    elif last < m50 or below50 / n >= 0.5:
+        level, note = "注意", "費半或過半 AI 龍頭跌破 50 日線，短期轉弱，留意是否續跌"
+    else:
+        level, note = "正常", "費半與 AI 龍頭股都在均線之上，趨勢仍向上"
+    return {
+        "name": "AI 族群（費城半導體）", "symbol": AI_INDEX, "level": level, "note": note,
+        "price": num(last, 2), "change": num(last / c.iloc[-2] - 1),
+        "drawdown": num(drawdown), "ma50": num(m50, 2), "ma200": num(m200, 2),
+        "below50": int(below50), "below200": int(below200), "count": len(members), "members": members,
+        "date": h.index[-1].strftime("%Y-%m-%d"),
+    }
