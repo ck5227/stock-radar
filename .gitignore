@@ -5,3 +5,4 @@ __pycache__/
 .claude/
 .venv/
 alert_state.json
+scan_result.json

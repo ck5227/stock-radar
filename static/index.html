@@ -73,7 +73,9 @@ button:disabled{opacity:.6;cursor:wait}
 .m-chg{display:none}
 /* 手機：每檔股票排成兩行卡片——代號、股價、建議、移除；下一行是理由 */
 @media (max-width:640px){
-  #scanTable thead,#holdTable thead{display:none}
+  #scanTable thead,#holdTable thead,.mkt-t thead{display:none}
+  .mkt-t tr{display:grid;grid-template-columns:1fr auto auto auto;align-items:center;column-gap:6px;padding:8px 4px;border-bottom:1px solid var(--line)}
+  .mkt-t td{border:0;padding:2px 4px}
   #scanTable tr,#holdTable tr{display:grid;grid-template-columns:1fr auto auto auto;align-items:center;column-gap:6px;padding:8px 4px;border-bottom:1px solid var(--line)}
   #scanTable td,#holdTable td{border:0;padding:2px 4px}
   .c-chg,.c-x2{display:none}
@@ -103,6 +105,9 @@ button:disabled{opacity:.6;cursor:wait}
 .why .ln{margin:2px 0}
 .site-foot{max-width:1200px;margin:0 auto;padding:8px 20px 28px;font-size:12px;color:var(--muted);line-height:1.7}
 .site-foot h2{font-size:13px;margin:0 0 4px;color:var(--ink)}
+.tier-h{display:flex;gap:10px;align-items:baseline;flex-wrap:wrap}
+.tier-h b{font-size:15px}
+.failed{font-size:12px;color:var(--muted);white-space:normal;min-width:160px;text-align:left}
 .empty,.loading{padding:40px;text-align:center;color:var(--muted)}
 .err{color:var(--fail);font-size:12px}
 dialog{border:0;border-radius:12px;padding:0;width:min(960px,96vw);max-height:92vh;background:var(--panel);color:var(--ink);box-shadow:0 20px 60px rgba(0,0,0,.35)}
@@ -139,6 +144,7 @@ h3{font-size:14px;margin:14px 0 6px}
 </header>
 <nav>
   <button data-tab="scan" class="on">選股</button>
+  <button data-tab="mkt">全市場掃描</button>
   <button data-tab="hold">我的持股</button>
   <button data-tab="bt">回測</button>
   <button data-tab="doc">說明</button>
@@ -158,6 +164,13 @@ h3{font-size:14px;margin:14px 0 6px}
       </div>
       <div class="scroll"><table id="scanTable"></table></div>
     </div>
+  </section>
+
+  <section id="tab-mkt" hidden>
+    <div class="panel" style="margin-bottom:16px;padding:12px 14px">
+      <div id="mktInfo" class="muted" style="font-size:13px">載入中…</div>
+    </div>
+    <div id="mktOut"></div>
   </section>
 
   <section id="tab-hold" hidden>
@@ -439,6 +452,52 @@ function notifyChanges() {
   });
   try { localStorage.setItem("holdActions", JSON.stringify(now)); } catch {}
 }
+
+// ---------- 全市場掃描
+const TIERS = {
+  A: ["⭐ 趨勢面與基本面全部符合", "趨勢樣板 8/8，基本面檢核全部通過，股價也低於內在價值"],
+  B: ["只差估值：好公司但偏貴", "趨勢 8/8、公司品質全部通過，只有股價高於內在價值"],
+  C: ["差一項", "趨勢 8/8，公司品質 80% 以上（只有一項沒過）"],
+};
+let mkt = null;
+async function loadMarketScan() {
+  if (mkt) return renderMarketScan();
+  $("#mktInfo").textContent = "載入中…";
+  const d = await api("/api/market-scan");
+  if (d.error) { $("#mktInfo").innerHTML = `<span class="err">${esc(d.error)}</span>`; return; }
+  mkt = d; renderMarketScan();
+}
+function renderMarketScan() {
+  const d = mkt, when = new Date(d.generated_at).toLocaleString();
+  const ai = d.market?.ai?.level, idx = ["^TWII", "^GSPC"].map(k => d.market?.[k]).filter(Boolean);
+  $("#mktInfo").innerHTML = `掃描時間 <b>${when}</b>・台股大型股與美股 S&amp;P 500 共 ${d.with_data} 檔・趨勢樣板 8/8 有 <b>${d.tt8}</b> 檔・每個交易日收盤後自動更新
+    ${idx.map(m => `・${esc(m.name)} <span class="badge m-${m.status}" style="min-width:0;padding:1px 6px;font-size:11px">${m.status}</span>`).join("")}
+    ${ai ? `・AI 泡沫警示 <span class="badge m-${ai}" style="min-width:0;padding:1px 6px;font-size:11px">${ai}</span>` : ""}`;
+  const inList = s => state.data.watchlist.includes(s) || state.data.watchlist.includes(s.replace(/\.TWO$/, ".TW"));
+  $("#mktOut").innerHTML = Object.keys(TIERS).map(t => {
+    const rows = d.rows.filter(r => r.tier === t);
+    return `<div class="panel" style="margin-bottom:16px">
+      <div class="toolbar tier-h"><b>${TIERS[t][0]}（${rows.length}）</b><span class="muted" style="font-size:12px">${TIERS[t][1]}</span></div>
+      <div class="scroll"><table class="mkt-t">${rows.length ? `<thead><tr><th class="l">股票</th><th>股價</th><th>漲跌</th><th class="l">建議</th><th>體質</th><th>估值</th><th>本益比</th><th class="l">沒過的條件</th><th></th></tr></thead><tbody>` +
+        rows.map(r => `<tr data-s="${esc(r.symbol)}">
+          <td class="l"><span class="sym">${esc(r.symbol)}</span><span class="nm">${esc(r.name)}</span></td>
+          <td class="c-px">${fmt(r.price)}<span class="m-chg ${cls(r.change)}">${pct(r.change, 2)}</span></td><td class="c-chg ${cls(r.change)}">${pct(r.change, 2)}</td>
+          <td class="l c-act">${dual({action: r.short}, {action: r.long})}</td>
+          <td class="c-x2">${r.quality == null ? "–" : Math.round(r.quality * 100) + " 分"}</td>
+          <td class="c-x2 ${cls(r.mos)}">${valuation({margin_of_safety: r.mos})}</td>
+          <td class="c-x2">${fmt(r.pe, 1)}</td>
+          <td class="failed why">${r.failed.length ? r.failed.map(esc).join("、") : "全部通過"}</td>
+          <td class="c-rm">${inList(r.symbol) ? '<span class="muted" style="font-size:12px">已在清單</span>' : `<button data-add="${esc(r.symbol)}">＋清單</button>`}</td></tr>`).join("") + "</tbody>"
+        : `<tbody><tr><td class="empty">今天沒有符合的股票</td></tr></tbody>`}</table></div></div>`;
+  }).join("") + `<p class="note">只掃描台股約 100 檔大型股與美股 S&amp;P 500；「全部符合」條件很嚴格，很多天會是 0 檔。點股票看詳細條件，按「＋清單」加入選股清單持續追蹤。不構成投資建議。</p>`;
+  document.querySelectorAll("#mktOut tr[data-s]").forEach(tr => tr.onclick = e => { if (!e.target.closest("button")) openDetail(tr.dataset.s); });
+  document.querySelectorAll("#mktOut [data-add]").forEach(b => b.onclick = async () => {
+    b.disabled = true; b.textContent = "加入中…";
+    await addSymbols("watchlist", [b.dataset.add], $("#watchMsg"), $("#addWatchBtn"));
+    renderMarketScan();
+  });
+}
+document.querySelector('nav button[data-tab="mkt"]').addEventListener("click", () => loadMarketScan());
 
 // ---------- 大盤
 async function loadMarket() {

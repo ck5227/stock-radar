@@ -5,6 +5,8 @@
 """
 import json
 import os
+import time
+import urllib.request
 from concurrent.futures import ThreadPoolExecutor
 
 from flask import Flask, jsonify, request, send_from_directory
@@ -16,6 +18,10 @@ import backtest
 BASE = os.path.dirname(os.path.abspath(__file__))
 LEGACY_FILE = os.path.join(BASE, "data.json")   # 舊版存檔，只用來帶入初始清單
 MAX_SYMBOLS = 80
+# 全市場掃描結果：GitHub Actions 每天產生，存在 scan-data 分支；本機可用 python market_scan.py 產生 scan_result.json
+SCAN_URL = os.environ.get("SCAN_URL", "https://raw.githubusercontent.com/ck5227/stock-radar/scan-data/result.json")
+LOCAL_SCAN = os.path.join(BASE, "scan_result.json")
+_scan_cache = {"t": 0, "data": None}
 DEFAULTS = {
     "watchlist": [
         "2330.TW", "2317.TW", "2454.TW", "2308.TW", "2382.TW", "3711.TW", "2412.TW", "2881.TW",
@@ -92,6 +98,22 @@ def sitemap():
             '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">'
             f"<url><loc>{request.url_root}</loc><changefreq>daily</changefreq></url></urlset>\n")
     return app.response_class(body, mimetype="application/xml")
+
+
+@app.get("/api/market-scan")
+def market_scan():
+    # 優先用線上每日結果（快取 10 分鐘）；抓不到時才用本機 scan_result.json
+    if _scan_cache["data"] is None or time.time() - _scan_cache["t"] > 600:
+        try:
+            with urllib.request.urlopen(SCAN_URL, timeout=20) as r:
+                _scan_cache.update(t=time.time(), data=json.loads(r.read().decode("utf-8")))
+        except Exception as e:
+            if _scan_cache["data"] is None:
+                if os.path.exists(LOCAL_SCAN):
+                    with open(LOCAL_SCAN, encoding="utf-8") as f:
+                        return jsonify(json.load(f))
+                return jsonify({"error": f"還沒有掃描結果：{e}"}), 503
+    return jsonify(_scan_cache["data"])
 
 
 @app.get("/api/version")

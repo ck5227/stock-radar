@@ -1,0 +1,42 @@
+# 每天收盤後掃描台股大型股與美股 S&P 500，結果存到 scan-data 分支的 result.json，
+# 網站「全市場掃描」分頁讀取。存在獨立分支，不會觸發網站重新部署。
+name: Market scan
+
+on:
+  schedule:
+    - cron: "15 6 * * 1-5"    # 台股收盤後（台北 14:15）
+    - cron: "30 21 * * 1-5"   # 美股收盤後（台北 05:30，夏令時間為 04:30 收盤）
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: market-scan
+  cancel-in-progress: false
+
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: pip install -r requirements.txt
+      - name: Scan
+        run: python market_scan.py "$RUNNER_TEMP/result.json"
+      - name: Publish to scan-data branch
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          cd "$RUNNER_TEMP"
+          mkdir out && cp result.json out/ && cd out
+          git init -q -b scan-data
+          git config user.name "github-actions[bot]"
+          git config user.email "41898299+github-actions[bot]@users.noreply.github.com"
+          git add result.json
+          git commit -q -m "scan $(date -u +%Y-%m-%dT%H:%MZ)"
+          git push -f -q "https://x-access-token:${GH_TOKEN}@github.com/${{ github.repository }}.git" scan-data

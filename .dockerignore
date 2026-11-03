@@ -4,3 +4,4 @@ __pycache__/
 .claude/
 alert_state.json
 .github/
+scan_result.json
