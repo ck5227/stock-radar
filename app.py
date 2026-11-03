@@ -8,6 +8,7 @@ import os
 from concurrent.futures import ThreadPoolExecutor
 
 from flask import Flask, jsonify, request, send_from_directory
+from werkzeug.middleware.proxy_fix import ProxyFix
 
 import analysis
 import backtest
@@ -25,6 +26,8 @@ DEFAULTS = {
 }
 
 app = Flask(__name__, static_folder=os.path.join(BASE, "static"))
+# 雲端主機在 https 代理後面，讓 request.url_root 顯示正確的 https 網址（robots.txt、sitemap 用）
+app.wsgi_app = ProxyFix(app.wsgi_app, x_proto=1, x_host=1)
 _pool = ThreadPoolExecutor(max_workers=6)
 
 
@@ -75,6 +78,20 @@ def analyze_many():
     for i, r in enumerate(ranked):
         r["minervini"]["rs_rank"] = round(1 + 98 * i / max(len(ranked) - 1, 1))
     return jsonify(results)
+
+
+@app.get("/robots.txt")
+def robots():
+    body = f"User-agent: *\nAllow: /\nDisallow: /api/\nSitemap: {request.url_root}sitemap.xml\n"
+    return app.response_class(body, mimetype="text/plain")
+
+
+@app.get("/sitemap.xml")
+def sitemap():
+    body = ('<?xml version="1.0" encoding="UTF-8"?>\n'
+            '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">'
+            f"<url><loc>{request.url_root}</loc><changefreq>daily</changefreq></url></urlset>\n")
+    return app.response_class(body, mimetype="application/xml")
 
 
 @app.get("/api/version")

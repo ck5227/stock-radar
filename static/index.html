@@ -3,7 +3,16 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>選股雷達</title>
+<title>選股雷達｜Minervini × Buffett 台股美股選股與買賣訊號</title>
+<meta name="description" content="免費線上選股工具：結合 Mark Minervini 趨勢樣板（SEPA）與 Warren Buffett 價值投資，自動分析台股與美股，提供短線與長線的買進、賣出、加碼建議、大盤方向、AI 泡沫警示與歷史回測。">
+<link rel="canonical" href="https://stock-radar-aaez.onrender.com/">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="選股雷達">
+<meta property="og:title" content="選股雷達｜Minervini × Buffett 台股美股選股與買賣訊號">
+<meta property="og:description" content="免費線上選股工具：結合 Mark Minervini 趨勢樣板（SEPA）與 Warren Buffett 價值投資，自動分析台股與美股，提供短線與長線的買進、賣出、加碼建議、大盤方向、AI 泡沫警示與歷史回測。">
+<meta property="og:url" content="https://stock-radar-aaez.onrender.com/">
+<meta property="og:locale" content="zh_TW">
+<script type="application/ld+json">{"@context":"https://schema.org","@type":"WebApplication","name":"選股雷達","url":"https://stock-radar-aaez.onrender.com/","applicationCategory":"FinanceApplication","operatingSystem":"Web","inLanguage":"zh-Hant","description":"免費線上選股工具：結合 Mark Minervini 趨勢樣板（SEPA）與 Warren Buffett 價值投資，自動分析台股與美股，提供短線與長線的買進、賣出、加碼建議、大盤方向、AI 泡沫警示與歷史回測。","offers":{"@type":"Offer","price":"0","priceCurrency":"TWD"}}</script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
 <style>
 :root{
@@ -91,6 +100,8 @@ button:disabled{opacity:.6;cursor:wait}
 .dual .lbl{font-size:11px;color:var(--muted)}
 .badge.sm{min-width:58px;padding:2px 6px;font-size:12px}
 .why .ln{margin:2px 0}
+.site-foot{max-width:1200px;margin:0 auto;padding:8px 20px 28px;font-size:12px;color:var(--muted);line-height:1.7}
+.site-foot h2{font-size:13px;margin:0 0 4px;color:var(--ink)}
 .empty,.loading{padding:40px;text-align:center;color:var(--muted)}
 .err{color:var(--fail);font-size:12px}
 dialog{border:0;border-radius:12px;padding:0;width:min(960px,96vw);max-height:92vh;background:var(--panel);color:var(--ink);box-shadow:0 20px 60px rgba(0,0,0,.35)}
@@ -206,6 +217,11 @@ h3{font-size:14px;margin:14px 0 6px}
     </div>
   </section>
 </main>
+
+<footer class="site-foot">
+  <h2>關於選股雷達</h2>
+  <p>免費線上選股工具：結合 Mark Minervini 趨勢樣板（SEPA）與 Warren Buffett 價值投資，自動分析台股與美股，提供短線與長線的買進、賣出、加碼建議、大盤方向、AI 泡沫警示與歷史回測。台股輸入代號（例如 2330 台積電），美股輸入英文代號（例如 NVDA、AAPL）即可。資料來自 Yahoo Finance，約延遲 15–20 分鐘。本網站依公開規則自動計算，不構成投資建議。</p>
+</footer>
 
 <dialog id="detail">
   <div class="dhead"><div id="dTitle"></div><button onclick="detail.close()">關閉</button></div>
