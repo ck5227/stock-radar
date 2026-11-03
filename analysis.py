@@ -98,6 +98,25 @@ def _row(df, *names):
     return None
 
 
+def statement_currency(sym):
+    """財報幣別。yfinance 不提供，直接讀 Yahoo 財報時間序列裡的 currencyCode（雲端主機也抓得到）。"""
+    from yfinance.data import YfData
+    url = (f"https://query2.finance.yahoo.com/ws/fundamentals-timeseries/v1/finance/timeseries/{sym}"
+           f"?symbol={sym}&type=annualNetIncome&period1=1500000000&period2={int(time.time())}")
+    res = YfData().get_raw_json(url)["timeseries"]["result"][0]
+    for v in res.get("annualNetIncome") or []:
+        if v and v.get("currencyCode"):
+            return v["currencyCode"]
+    return None
+
+
+def fx_rate(src, dst):
+    """1 單位 src 等於多少 dst（例如 TWD→USD）。"""
+    if src == dst:
+        return 1.0
+    return float(get_history(f"{src}{dst}=X")["Close"].iloc[-1])
+
+
 def get_fundamentals(sym):
     def fetch():
         t = yf.Ticker(sym)
@@ -161,6 +180,34 @@ def get_fundamentals(sym):
         if not info and inc is None and bs is None:
             raise ValueError(f"暫時抓不到 {sym} 的財報")   # 不快取，下次重試
 
+        # 幣別與股數：海外公司在美國掛牌（ADR，如 TSM＝5 股台積電）時，財報幣別與股價幣別不同，
+        # 股數也要用「掛牌單位」計算，否則每股價值會差好幾倍
+        price_ccy = info.get("currency")
+        listing_shares = info.get("sharesOutstanding") or info.get("impliedSharesOutstanding")
+        try:
+            fi = t.fast_info
+            price_ccy = price_ccy or fi.currency
+            listing_shares = listing_shares or fi.shares
+        except Exception:
+            pass
+        fin_ccy = info.get("financialCurrency")
+        if not fin_ccy:
+            try:
+                fin_ccy = statement_currency(sym)
+            except Exception:
+                fin_ccy = None
+        fx, fx_note = 1.0, None
+        if fin_ccy and price_ccy and fin_ccy != price_ccy:
+            try:
+                fx = fx_rate(fin_ccy, price_ccy)
+                fx_note = f"財報為 {fin_ccy}，已依匯率 1 {fin_ccy} = {fx:.4g} {price_ccy} 換算"
+            except Exception:
+                fx = None   # 換算失敗就不估值
+        shares = listing_shares or shares_bs
+
+        def conv(x):
+            return float(x) * fx if x is not None and fx else None
+
         q_eps_growth = yoy(q_eps)
         if q_eps_growth is None:
             q_eps_growth = info.get("earningsQuarterlyGrowth") or info.get("earningsGrowth")
@@ -173,8 +220,10 @@ def get_fundamentals(sym):
             "sector": info.get("sector") or ("Financial Services" if looks_financial else None),
             "industry": info.get("industry"),
             "has_profile": bool(info.get("sector") or info.get("returnOnEquity") is not None),
-            "currency": info.get("currency"),
-            "financial_currency": info.get("financialCurrency"),
+            "currency": price_ccy,
+            "financial_currency": price_ccy if fx else fin_ccy,   # 已換算成股價幣別；換算失敗則保留原幣別讓估值略過
+            "reported_currency": fin_ccy,
+            "fx_note": fx_note,
             "roe": info.get("returnOnEquity") if info.get("returnOnEquity") is not None else ratio(ni_last, equity),
             "debt_to_equity": (info["debtToEquity"] / 100) if info.get("debtToEquity") is not None else ratio(debt, equity),
             "gross_margin": info.get("grossMargins") if info.get("grossMargins") is not None else ratio(gross, revenue),
@@ -182,13 +231,14 @@ def get_fundamentals(sym):
             "pe": info.get("trailingPE"),
             "forward_pe": info.get("forwardPE"),
             "pb": info.get("priceToBook"),
-            "eps_ttm": eps_ttm,
+            "eps_ttm": eps_ttm if fx == 1.0 else None,   # 幣別不同時改用市值／淨利算本益比
+            "ni_ttm": conv(ni_last),
             "dividend_yield": info.get("dividendYield"),
-            "shares": info.get("sharesOutstanding") or info.get("impliedSharesOutstanding") or shares_bs,
-            "book_per_share": ratio(equity, info.get("sharesOutstanding") or shares_bs),
-            "fcf_latest": info.get("freeCashflow") or last(cf, "Free Cash Flow"),
-            "net_income": [float(x) for x in net_income] if net_income is not None else [],
-            "fcf": [float(x) for x in fcf] if fcf is not None else [],
+            "shares": shares,
+            "book_per_share": ratio(conv(equity), shares),
+            "fcf_latest": conv(info.get("freeCashflow") or last(cf, "Free Cash Flow")),
+            "net_income": [conv(x) for x in net_income] if net_income is not None and fx else [],
+            "fcf": [conv(x) for x in fcf] if fcf is not None and fx else [],
             "q_eps_growth": q_eps_growth,
             "q_rev_growth": q_rev_growth,
         }
@@ -330,7 +380,7 @@ def intrinsic_value(fund):
         cash *= 1 + (g if year <= 5 else g / 2)
         pv += cash / (1 + r) ** year
     pv += cash * (1 + tg) / (r - tg) / (1 + r) ** 10
-    return pv / shares, g, None
+    return pv / shares, g, fund.get("fx_note")
 
 
 def buffett(fund, price):
@@ -428,6 +478,8 @@ def analyze(sym):
     fund["currency"] = fund.get("currency") or meta.get("currency")
     if fund.get("pe") is None and (fund.get("eps_ttm") or 0) > 0:
         fund["pe"] = price / fund["eps_ttm"]
+    elif fund.get("pe") is None and (fund.get("ni_ttm") or 0) > 0 and fund.get("shares"):
+        fund["pe"] = price * fund["shares"] / fund["ni_ttm"]
     if fund.get("pb") is None and (fund.get("book_per_share") or 0) > 0:
         fund["pb"] = price / fund["book_per_share"]
     tech = minervini(h, bench, fund)
