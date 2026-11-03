@@ -236,7 +236,7 @@ def get_fundamentals(sym):
             "dividend_yield": info.get("dividendYield"),
             "shares": shares,
             "book_per_share": ratio(conv(equity), shares),
-            "fcf_latest": conv(info.get("freeCashflow") or last(cf, "Free Cash Flow")),
+            "fcf_latest": conv(last(cf, "Free Cash Flow") or info.get("freeCashflow")),   # 以年報自由現金流為準；簡介裡的 freeCashflow 是定義不同、波動很大的 levered FCF
             "net_income": [conv(x) for x in net_income] if net_income is not None and fx else [],
             "fcf": [conv(x) for x in fcf] if fcf is not None and fx else [],
             "q_eps_growth": q_eps_growth,
