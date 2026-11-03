@@ -77,6 +77,12 @@ def analyze_many():
     return jsonify(results)
 
 
+@app.get("/api/version")
+def version():
+    # Render 會提供部署的 git commit，方便確認雲端跑的是哪一版
+    return jsonify({"commit": os.environ.get("RENDER_GIT_COMMIT", "local")[:7]})
+
+
 @app.get("/api/market")
 def market():
     out = []

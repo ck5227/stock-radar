@@ -362,7 +362,7 @@ def intrinsic_value(fund):
     if is_financial(fund):
         return None, None, "金融股不適用自由現金流折現"
     if fund.get("financial_currency") and fund.get("currency") and fund["financial_currency"] != fund["currency"]:
-        return None, None, "財報幣別與股價幣別不同，略過估值"
+        return None, None, fund.get("fx_note") or "財報幣別與股價幣別不同，略過估值"
     shares = fund.get("shares")
     fcf = [x for x in fund.get("fcf", []) if x is not None]
     base = fund.get("fcf_latest") or (fcf[-1] if fcf else None)
@@ -480,6 +480,10 @@ def analyze(sym):
         fund["pe"] = price / fund["eps_ttm"]
     elif fund.get("pe") is None and (fund.get("ni_ttm") or 0) > 0 and fund.get("shares"):
         fund["pe"] = price * fund["shares"] / fund["ni_ttm"]
+    if not fund.get("reported_currency") and fund.get("pe") is not None and fund["pe"] < 3:
+        fund["pe"] = fund["pb"] = None
+        fund["financial_currency"] = "?"   # 讓估值略過
+        fund["fx_note"] = "財報幣別無法確認，略過估值"
     if fund.get("pb") is None and (fund.get("book_per_share") or 0) > 0:
         fund["pb"] = price / fund["book_per_share"]
     tech = minervini(h, bench, fund)
@@ -495,6 +499,7 @@ def analyze(sym):
         "pe": num(fund.get("pe"), 2),
         "minervini": tech,
         "buffett": buff,
+        "fx": {"reported": fund.get("reported_currency"), "note": fund.get("fx_note")},
         "market": mkt,
         "advice": buy_advice(tech, buff, mkt),
         "hold": hold_advice(h, tech, buff, mkt),
