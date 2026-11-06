@@ -4,6 +4,7 @@
 """
 import math
 import os
+import re
 import tempfile
 import threading
 import time
@@ -46,7 +47,7 @@ def num(x, nd=4):
 
 def normalize_symbol(s):
     s = s.strip().upper()
-    if s.isdigit():          # 台股只輸入代號時預設上市
+    if re.fullmatch(r"\d{4,6}[A-Z]?", s):   # 台股只輸入代號時預設上市（含 00631L 這類 ETF）
         s += ".TW"
     elif s in ("BRKB", "BRKA"):
         s = s[:3] + "-" + s[3]
@@ -76,7 +77,7 @@ def get_history(sym):
             meta = t.history_metadata or {}
         except Exception:
             meta = {}
-        h.attrs["meta"] = {k: meta.get(k) for k in ("longName", "shortName", "currency")}
+        h.attrs["meta"] = {k: meta.get(k) for k in ("longName", "shortName", "currency", "instrumentType")}
         return h
     return _cached(("h", sym), PRICE_TTL, fetch)
 
@@ -86,7 +87,7 @@ def resolve(sym):
     sym = normalize_symbol(sym)
     try:
         return sym, get_history(sym)
-    except ValueError:
+    except Exception:
         if sym.endswith(".TW"):
             alt = sym[:-3] + ".TWO"
             return alt, get_history(alt)
@@ -188,13 +189,16 @@ def get_fundamentals(sym):
         # 幣別與股數：海外公司在美國掛牌（ADR，如 TSM＝5 股台積電）時，財報幣別與股價幣別不同，
         # 股數也要用「掛牌單位」計算，否則每股價值會差好幾倍
         price_ccy = info.get("currency")
-        listing_shares = info.get("sharesOutstanding") or info.get("impliedSharesOutstanding")
+        # 多類股公司（ABNB、GOOGL…）的 sharesOutstanding 只算單一類股，要取涵蓋全部類股的最大值
+        share_counts = [info.get("sharesOutstanding"), info.get("impliedSharesOutstanding")]
         try:
             fi = t.fast_info
             price_ccy = price_ccy or fi.currency
-            listing_shares = listing_shares or fi.shares
+            if not info.get("impliedSharesOutstanding"):
+                share_counts.append(fi.shares)
         except Exception:
             pass
+        listing_shares = max((x for x in share_counts if x), default=None)
         fin_ccy = info.get("financialCurrency")
         if not fin_ccy:
             try:
@@ -208,7 +212,9 @@ def get_fundamentals(sym):
                 fx_note = f"財報為 {fin_ccy}，已依匯率 1 {fin_ccy} = {fx:.4g} {price_ccy} 換算"
             except Exception:
                 fx = None   # 換算失敗就不估值
-        shares = listing_shares or shares_bs
+        # 財報股數是原股，ADR 不能用；同幣別時一併比較，避免漏算類股
+        same_listing = fx == 1.0 and not fx_note
+        shares = max((x for x in (listing_shares, shares_bs if same_listing or not listing_shares else None) if x), default=None)
 
         def conv(x):
             return float(x) * fx if x is not None and fx else None
@@ -224,6 +230,7 @@ def get_fundamentals(sym):
             "name": info.get("longName") or info.get("shortName"),
             "sector": info.get("sector") or ("Financial Services" if looks_financial else None),
             "industry": info.get("industry"),
+            "looks_financial": looks_financial,
             "has_profile": bool(info.get("sector") or info.get("returnOnEquity") is not None),
             "currency": price_ccy,
             "financial_currency": price_ccy if fx else fin_ccy,   # 已換算成股價幣別；換算失敗則保留原幣別讓估值略過
@@ -359,6 +366,8 @@ def _cagr(series):
 
 def is_financial(fund):
     """銀行、保險、券商等以資產負債表為主的金融股（Visa、Mastercard 等支付網路除外）。"""
+    if fund.get("looks_financial"):
+        return True
     return fund.get("sector") == "Financial Services" and fund.get("industry") != "Credit Services"
 
 
@@ -493,7 +502,10 @@ def analyze(sym):
         fund["pb"] = price / fund["book_per_share"]
     tech = minervini(h, bench, fund)
     buff = buffett(fund, price)
-    return {
+    etf = meta.get("instrumentType") in ("ETF", "MUTUALFUND")
+    if etf:
+        buff["verdict"] = "ETF 不適用"
+    result = {
         "symbol": sym,
         "name": fund["name"],
         "sector": fund.get("sector"),
@@ -513,6 +525,9 @@ def analyze(sym):
         "advice_ultra": buy_advice_ultra(price, buff),
         "hold_ultra": hold_advice_ultra(price, buff),
     }
+    if etf:
+        result.update(etf_advice(result, price, tech, mkt))
+    return result
 
 
 def chart_data(sym, days=260):
@@ -778,6 +793,42 @@ def hold_advice_ultra(price, b):
         return {"action": "加碼", "reasons": [f"長期體質佳且安全邊際 {mos * 100:.0f}%"]}
     return {"action": "續抱", "reasons": ["公司體質未變差，短期漲跌不影響超長線判斷" if lasting
                                        else "體質普通，持續追蹤財報"]}
+
+
+# ---------------------------------------------------------------- ETF
+# ETF 沒有公司財報，不能用基本面判斷；沒資料不等於體質差。只依趨勢與持有期間給建議。
+
+LEVERAGED = re.compile(r"正\s*2|反\s*1|2X|3X|LEVERAGED|INVERSE|ULTRA|BEAR|DAILY", re.I)
+
+
+def etf_advice(a, price, t, mkt):
+    name = a["name"] or ""
+    above200 = bool(t["ma200"]) and price > t["ma200"]
+    near50 = bool(t["ma50"]) and abs(price / t["ma50"] - 1) <= 0.05
+    bear = bool(mkt) and mkt["status"] == "空頭"
+    strip = lambda x: {**x, "reasons": [r for r in x["reasons"] if "基本面" not in r] or ["ETF 依趨勢判斷"]}
+    out = {"advice": strip(a["advice"]), "hold": strip(a["hold"])}
+
+    if LEVERAGED.search(name) or a["symbol"].split(".")[0].endswith(("L", "R")):
+        why = "槓桿／反向 ETF 每日重設，長期持有會有耗損，不適合長抱"
+        out["advice_long"] = out["advice_ultra"] = {"action": "避開", "reasons": [why]}
+        out["hold_long"] = out["hold_ultra"] = {"action": "賣出", "reasons": [why]}
+        return out
+
+    if not above200:
+        out["advice_long"] = {"action": "觀察", "reasons": ["跌破 200 日線，等趨勢轉強再買"]}
+        out["hold_long"] = {"action": "減碼", "reasons": ["跌破 200 日線，依長線規則可先減碼；打算長抱者不必理會"]}
+    elif near50:
+        out["advice_long"] = {"action": "買進", "reasons": ["站上 200 日線且回檔到 50 日線附近"]}
+        out["hold_long"] = {"action": "續抱", "reasons": ["站穩 200 日線，回檔屬正常波動"]}
+    else:
+        out["advice_long"] = {"action": "觀察", "reasons": ["趨勢向上，但離 50 日線較遠，可等回檔"]}
+        out["hold_long"] = {"action": "續抱", "reasons": ["站穩 200 日線，回檔屬正常波動"]}
+
+    out["advice_ultra"] = {"action": "買進", "reasons": [
+        ("大盤空頭時價格較低，" if bear else "") + "若追蹤大盤，分散且不需選股，適合分批定期買；產業型 ETF 風險較集中"]}
+    out["hold_ultra"] = {"action": "續抱", "reasons": ["ETF 沒有單一公司風險，短期下跌不是賣出理由；需要用錢或產業型 ETF 前景改變時再檢視"]}
+    return out
 
 
 # ---------------------------------------------------------------- AI 族群警示
