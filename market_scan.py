@@ -82,7 +82,7 @@ def row(a, tier):
         "quality": b["quality"], "score": b["score"], "max": b["max"],
         "mos": b["margin_of_safety"], "iv": b["intrinsic_value"], "pe": a["pe"],
         "failed": [c["label"] for c in b["criteria"] if c["pass"] is False],
-        "short": a["advice"]["action"], "long": a["advice_long"]["action"],
+        "short": a["advice"]["action"], "long": a["advice_long"]["action"], "ultra": a["advice_ultra"]["action"],
     }
 
 

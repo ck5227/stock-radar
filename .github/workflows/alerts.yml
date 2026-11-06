@@ -3,7 +3,7 @@
 #   NTFY_TOPIC  手機 ntfy app 訂閱的主題名稱
 #   HOLDINGS    持股代號，逗號分隔，例如 2330,NVDA
 #   WATCHLIST   觀察清單代號，逗號分隔（選填）
-#   STYLE       short／long／both，只收短線或長線通知（選填，預設 both）
+#   STYLE       short／long／ultra／both，只收某一種通知（選填，預設 both 全收）
 name: Stock alerts
 
 on:

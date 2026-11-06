@@ -145,6 +145,11 @@ def run_backtest():
     return jsonify(backtest.run(clean_symbols(body.get("symbols", [])), years, _pool, mode))
 
 
+@app.post("/api/rolling")
+def rolling():
+    return jsonify(backtest.rolling_hold(clean_symbols((request.json or {}).get("symbols", [])), 5, _pool))
+
+
 @app.get("/api/stock/<sym>")
 def stock(sym):
     try:

@@ -6,7 +6,7 @@
 通知時機：
   持股：建議變成「賣出／減碼／加碼」
   觀察清單：建議變成「強力買進／買進」
-短線與長線分開追蹤；STYLE=short 或 long 可只收其中一種（預設 both 兩種都收）。
+短線、長線、超長線分開追蹤；STYLE=short、long 或 ultra 可只收其中一種（預設 both 全部都收）。
 同一檔股票的同一個建議，一天最多通知一次（盤中訊號可能來回變動）。
 另外追蹤「AI 泡沫警示」等級（正常／注意／警戒／危險），等級改變就通知。
 """
@@ -21,7 +21,8 @@ STATE_FILE = "alert_state.json"
 HOLD_ALERT = {"賣出": ("rotating_light", 5), "減碼": ("warning", 4), "加碼": ("chart_with_upwards_trend", 4)}
 BUY_ALERT = {"強力買進": ("star", 4), "買進": ("moneybag", 3)}
 AI_TAGS = {"正常": ("green_circle", 3), "注意": ("yellow_circle", 3), "警戒": ("orange_circle", 4), "危險": ("red_circle", 5)}
-VIEWS = {"short": ("短線", "hold", "advice"), "long": ("長線", "hold_long", "advice_long")}
+VIEWS = {"short": ("短線", "hold", "advice"), "long": ("長線", "hold_long", "advice_long"),
+         "ultra": ("超長線", "hold_ultra", "advice_ultra")}
 
 
 def symbols(env):

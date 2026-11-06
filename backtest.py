@@ -154,3 +154,44 @@ def run(symbols, years, pool, mode="short"):
         },
         "results": results,
     }
+
+
+def rolling_hold(symbols, years, pool):
+    """超長線驗證：歷史上任何一天買進、抱滿 years 年，結果如何（已還原股息與分割）。"""
+    days = years * 252
+
+    def one(sym):
+        try:
+            sym, _ = analysis.resolve(sym)
+            c = long_history(sym)["Close"]
+            bench = long_history(analysis.benchmark_for(sym))["Close"].reindex(c.index, method="ffill")
+        except Exception as e:
+            return {"symbol": sym, "error": str(e)}
+        r = (c / c.shift(days) - 1).dropna()
+        if len(r) < 252:
+            return {"symbol": sym, "error": f"上市不足 {years + 1} 年，資料不夠"}
+        rb = (bench / bench.shift(days) - 1).reindex(r.index)
+        cagr = (1 + r) ** (1 / years) - 1
+        return {
+            "symbol": sym, "samples": len(r), "start": c.index[0].strftime("%Y-%m-%d"),
+            "win_rate": analysis.num((r > 0).mean()),
+            "beat_index": analysis.num((r > rb).mean()),
+            "median_cagr": analysis.num(cagr.median()),
+            "worst": analysis.num(r.min()), "best": analysis.num(r.max()),
+            "max_drawdown": analysis.num((c / c.cummax() - 1).min()),
+        }
+    results = list(pool.map(one, symbols))
+    ok = [r for r in results if "error" not in r]
+
+    def index_row(idx):
+        c = long_history(idx)["Close"]
+        r = (c / c.shift(days) - 1).dropna()
+        return {"symbol": idx, "name": analysis.INDEX_NAMES[idx], "win_rate": analysis.num((r > 0).mean()),
+                "median_cagr": analysis.num(((1 + r) ** (1 / years) - 1).median()), "worst": analysis.num(r.min()),
+                "max_drawdown": analysis.num((c / c.cummax() - 1).min())}
+    avg = lambda k: analysis.num(sum(r[k] for r in ok) / len(ok)) if ok else None
+    return {
+        "years": years, "results": results, "indexes": [index_row(i) for i in ("^TWII", "^GSPC")],
+        "summary": {"stocks": len(ok), "win_rate": avg("win_rate"), "beat_index": avg("beat_index"),
+                    "median_cagr": avg("median_cagr"), "avg_worst": avg("worst"), "avg_max_drawdown": avg("max_drawdown")},
+    }

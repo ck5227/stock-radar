@@ -3,11 +3,16 @@
 資料來源：Yahoo Finance (yfinance)。股價約有 15~20 分鐘延遲。
 """
 import math
+import os
+import tempfile
 import threading
 import time
 
 import pandas as pd
 import yfinance as yf
+
+# 用自己的快取資料夾，避免共用的 yfinance 快取損毀時連帶抓不到股價
+yf.set_tz_cache_location(os.path.join(tempfile.gettempdir(), "stock_radar_yf_cache"))
 
 PRICE_TTL = 60          # 股價快取秒數
 FUND_TTL = 12 * 3600    # 財報快取秒數
@@ -505,6 +510,8 @@ def analyze(sym):
         "hold": hold_advice(h, tech, buff, mkt),
         "advice_long": buy_advice_long(price, tech, buff, mkt),
         "hold_long": hold_advice_long(h, tech, buff, mkt),
+        "advice_ultra": buy_advice_ultra(price, buff),
+        "hold_ultra": hold_advice_ultra(price, buff),
     }
 
 
@@ -728,6 +735,49 @@ def hold_advice_long(h, t, b, mkt=None):
             if pricey:
                 reasons.append("估值偏高（超過內在價值 2 倍），續抱但不加碼")
     return {"action": action, "reasons": reasons}
+
+
+# ---------------------------------------------------------------- 超長線建議（5 年以上）
+# 持有期長到足以跨越多次大跌，所以不看均線與大盤，只問兩件事：公司能不能撐過 5 年以上、買價合不合理。
+
+def _lasting(b):
+    """公司體質：獲利穩定成長且品質 ≥ 70%。回傳 (品質, 是否合格, 獲利是否穩定)。"""
+    q = b["quality"] if b["quality"] is not None else 0
+    stable = next((c["pass"] for c in b["criteria"] if c["label"].startswith("獲利穩定成長")), None)
+    return q, q >= 0.7 and stable is True, stable
+
+
+def buy_advice_ultra(price, b):
+    """超長線選股：體質決定能不能買，價格決定現在買不買，與短期走勢無關。"""
+    q, lasting, stable = _lasting(b)
+    iv, mos = b["intrinsic_value"], b["margin_of_safety"]
+    cheap = b["criteria"][-1]["pass"]      # 內在價值或金融股的股價淨值比
+    if q < 0.5:
+        return {"action": "避開", "reasons": ["公司體質不足以放 5 年以上"]}
+    if not lasting:
+        why = "獲利不夠穩定" if stable is False else "公司品質未達長期持有標準"
+        return {"action": "觀察", "reasons": [why + "，先不列入超長線"]}
+    if mos is not None and mos >= 0.25:
+        return {"action": "強力買進", "reasons": [f"長期體質佳，安全邊際 {mos * 100:.0f}%"]}
+    if cheap:
+        return {"action": "買進", "reasons": ["長期體質佳，價格合理"]}
+    if iv and price <= iv * 1.5:
+        return {"action": "買進", "reasons": ["長期體質佳，價格略高於內在價值，可分批慢慢買"]}
+    return {"action": "觀察", "reasons": ["長期體質佳，但目前太貴，等回檔或獲利成長追上股價"]}
+
+
+def hold_advice_ultra(price, b):
+    """超長線持股：股價下跌不是賣出理由，只有公司本身變差才動作。"""
+    q, lasting, stable = _lasting(b)
+    mos = b["margin_of_safety"]
+    if q < 0.5:
+        return {"action": "賣出", "reasons": ["公司體質已明顯轉弱，長期持有的理由消失"]}
+    if stable is False and q < 0.7:
+        return {"action": "減碼", "reasons": ["獲利不穩且品質下滑，重新檢視是否值得長抱"]}
+    if lasting and mos is not None and mos >= 0.25:
+        return {"action": "加碼", "reasons": [f"長期體質佳且安全邊際 {mos * 100:.0f}%"]}
+    return {"action": "續抱", "reasons": ["公司體質未變差，短期漲跌不影響超長線判斷" if lasting
+                                       else "體質普通，持續追蹤財報"]}
 
 
 # ---------------------------------------------------------------- AI 族群警示

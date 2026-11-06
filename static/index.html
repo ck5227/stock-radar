@@ -73,17 +73,18 @@ button:disabled{opacity:.6;cursor:wait}
 .m-chg{display:none}
 /* 手機：每檔股票排成兩行卡片——代號、股價、建議、移除；下一行是理由 */
 @media (max-width:640px){
+  #scanTable,#holdTable,.mkt-t,#scanTable tbody,#holdTable tbody,.mkt-t tbody{display:block;width:100%}
   #scanTable thead,#holdTable thead,.mkt-t thead{display:none}
-  .mkt-t tr{display:grid;grid-template-columns:1fr auto auto auto;align-items:center;column-gap:6px;padding:8px 4px;border-bottom:1px solid var(--line)}
+  .mkt-t tr{display:grid;grid-template-columns:minmax(0,1fr) auto auto auto;align-items:center;column-gap:6px;padding:8px 4px;border-bottom:1px solid var(--line)}
   .mkt-t td{border:0;padding:2px 4px}
-  #scanTable tr,#holdTable tr{display:grid;grid-template-columns:1fr auto auto auto;align-items:center;column-gap:6px;padding:8px 4px;border-bottom:1px solid var(--line)}
+  #scanTable tr,#holdTable tr{display:grid;grid-template-columns:minmax(0,1fr) auto auto auto;align-items:center;column-gap:6px;padding:8px 4px;border-bottom:1px solid var(--line)}
   #scanTable td,#holdTable td{border:0;padding:2px 4px}
   .c-chg,.c-x2{display:none}
   .m-chg{display:block;font-size:11px}
   .c-rm{order:1}
   td.why{order:2;grid-column:1/-1;min-width:0;font-size:12px}
   .badge{min-width:0;padding:3px 8px;font-size:13px}
-  .nm{max-width:150px}
+  .nm{max-width:100%}
   .cards{grid-template-columns:repeat(4,1fr);gap:6px}
   .card{padding:8px}.card .n{font-size:20px}.card .badge{font-size:11px;padding:2px 4px}
 }
@@ -114,7 +115,7 @@ dialog{border:0;border-radius:12px;padding:0;width:min(960px,96vw);max-height:92
 dialog::backdrop{background:rgba(0,0,0,.45)}
 .dhead{display:flex;justify-content:space-between;align-items:flex-start;gap:12px;padding:16px 20px;border-bottom:1px solid var(--line)}
 .dbody{padding:16px 20px;overflow:auto;max-height:calc(92vh - 90px)}
-.verdict{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:12px}
+.verdict{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-bottom:12px}
 .verdict>div{background:var(--bg);border-radius:10px;padding:12px 14px}
 .verdict h4{margin:0 0 6px;font-size:12px;color:var(--muted);font-weight:500}
 .verdict ul{margin:8px 0 0;padding-left:18px}
@@ -152,7 +153,7 @@ h3{font-size:14px;margin:14px 0 6px}
 <div class="market" id="market"></div>
 <main>
   <section id="tab-scan">
-    <div class="viewbar"><span class="muted">卡片統計與排序依：</span><button data-view="short">短線（約 1 個月）</button><button data-view="long">長線（約半年到一年）</button></div>
+    <div class="viewbar"><span class="muted">卡片統計與排序依：</span><button data-view="short">短線（約 1 個月）</button><button data-view="long">長線（約半年到一年）</button><button data-view="ultra">超長線（5 年以上）</button></div>
     <div class="cards" id="scanCards"></div>
     <div class="panel">
       <div class="toolbar">
@@ -174,7 +175,7 @@ h3{font-size:14px;margin:14px 0 6px}
   </section>
 
   <section id="tab-hold" hidden>
-    <div class="viewbar"><span class="muted">卡片統計與排序依：</span><button data-view="short">短線（約 1 個月）</button><button data-view="long">長線（約半年到一年）</button></div>
+    <div class="viewbar"><span class="muted">卡片統計與排序依：</span><button data-view="short">短線（約 1 個月）</button><button data-view="long">長線（約半年到一年）</button><button data-view="ultra">超長線（5 年以上）</button></div>
     <div class="cards" id="holdCards"></div>
     <div class="panel">
       <div class="toolbar">
@@ -197,6 +198,7 @@ h3{font-size:14px;margin:14px 0 6px}
       </div>
     </div>
     <div id="btOut"></div>
+    <div id="rollOut" style="margin-top:16px"></div>
   </section>
 
   <section id="tab-doc" hidden>
@@ -213,6 +215,8 @@ h3{font-size:14px;margin:14px 0 6px}
       <p>沒有人能預測泡沫何時破裂。這裡追蹤破裂時通常會先出現的訊號：費城半導體指數與 6 檔 AI 龍頭（NVDA、AVGO、AMD、TSM、MU、台積電）的均線位置。<b>正常</b>：都在均線之上；<b>注意</b>：費半或過半龍頭跌破 50 日線；<b>警戒</b>：費半或過半龍頭跌破 200 日線；<b>危險</b>：費半跌破 200 日線、均線下彎且離高點跌超過 25%。等級改變時會推播到手機。</p>
       <h3>短線與長線</h3>
       <p>每檔股票同時給兩種建議。<b>短線</b>以 Minervini 的買點與停損為主，回測中持有中位數約 3–4 週、賺錢的部位約 2 個月；<b>長線</b>以 Buffett 的公司品質為主、只用 200 日線把關趨勢，持有中位數約 6 個月、賺錢的部位約 11 個月。長線不因一般回檔或估值偏高就減碼，只在跌破 200 日線或基本面轉弱時動作。</p>
+      <h3>超長線（5 年以上）</h3>
+      <p>持有 5 年以上時，股價大跌幾乎一定會遇到，所以<b>不看均線與大盤</b>，只看公司體質（品質 70 分以上且獲利穩定成長）與買進價格。安全邊際 25% 以上為「強力買進」；股價不高於內在價值 1.5 倍可「買進」或分批買；太貴就「觀察」。已持有時，股價下跌不是賣出理由，只有公司體質明顯轉弱才減碼或賣出。免費資料只有約 4–5 年財報，無法確認 10 年以上的紀錄，買進前請自行確認公司的長期競爭力。</p>
       <h3>選股建議（短線）</h3>
       <table>
         <tr><td><span class="badge a-強力買進">強力買進</span></td><td>趨勢正在買點，而且是優質企業（兩者都同意）</td></tr>
@@ -270,10 +274,11 @@ document.querySelectorAll("nav button").forEach(b => b.onclick = () => {
 
 // ---------- 選股
 // 短線（Minervini 時機為主，約 1 個月）與長線（Buffett 品質為主＋200 日線，約半年到一年）分開建議
-const buyOf = (r, v = state.view) => v === "long" ? r.advice_long : r.advice;
-const holdOf = (r, v = state.view) => v === "long" ? r.hold_long : r.hold;
-const dual = (a, b) => `<div class="dual"><span class="lbl">短線</span>${badge(a.action, "sm")}</div><div class="dual"><span class="lbl">長線</span>${badge(b.action, "sm")}</div>`;
-const dualWhy = (a, b) => `<div class="ln"><b>短線</b> ${a.reasons.map(esc).join("；")}</div><div class="ln"><b>長線</b> ${b.reasons.map(esc).join("；")}</div>`;
+const buyOf = (r, v = state.view) => ({short: r.advice, long: r.advice_long, ultra: r.advice_ultra})[v];
+const holdOf = (r, v = state.view) => ({short: r.hold, long: r.hold_long, ultra: r.hold_ultra})[v];
+const HORIZONS = ["短線", "長線", "超長線"];
+const dual = (...xs) => xs.map((x, i) => x ? `<div class="dual"><span class="lbl">${HORIZONS[i]}</span>${badge(x.action, "sm")}</div>` : "").join("");
+const dualWhy = (...xs) => xs.map((x, i) => `<div class="ln"><b>${HORIZONS[i]}</b> ${x.reasons.map(esc).join("；")}</div>`).join("");
 function setView(v) {
   state.view = v;
   try { localStorage.setItem("stockRadarView", v); } catch {}
@@ -299,8 +304,8 @@ function renderScan() {
     (rows.length ? rows.map(r => r.error
       ? `<tr><td class="l sym">${esc(r.symbol)}</td><td colspan="7" class="l err">${esc(r.error)}</td><td class="c-rm"><button class="x" data-rm="${esc(r.symbol)}" title="移除">✕</button></td></tr>`
       : `<tr data-s="${esc(r.symbol)}">${stockCell(r)}${priceCells(r)}
-        <td class="l c-act">${dual(r.advice, r.advice_long)}</td>
-        <td class="why">${dualWhy(r.advice, r.advice_long)}</td>
+        <td class="l c-act">${dual(r.advice, r.advice_long, r.advice_ultra)}</td>
+        <td class="why">${dualWhy(r.advice, r.advice_long, r.advice_ultra)}</td>
         <td class="c-x2">${r.minervini.tt_pass}/8</td>
         <td class="c-x2">${r.buffett.quality == null ? "–" : Math.round(r.buffett.quality * 100) + " 分"}</td>
         <td class="c-x2 ${cls(r.buffett.margin_of_safety)}">${valuation(r.buffett)}</td>
@@ -321,8 +326,8 @@ function renderHold() {
     : `<thead><tr><th class="l">股票</th><th>股價</th><th>漲跌</th><th class="l">建議</th><th class="l">理由</th><th></th></tr></thead><tbody>` +
       rows.map(r => r.error
         ? `<tr><td class="l sym">${esc(r.symbol)}</td><td colspan="4" class="l err">${esc(r.error)}</td><td class="c-rm"><button class="x" data-rm="${esc(r.symbol)}">✕</button></td></tr>`
-        : `<tr data-s="${esc(r.symbol)}">${stockCell(r)}${priceCells(r)}<td class="l c-act">${dual(r.hold, r.hold_long)}</td>
-          <td class="why">${dualWhy(r.hold, r.hold_long)}</td><td class="c-rm"><button class="x" data-rm="${esc(r.symbol)}" title="移除">✕</button></td></tr>`).join("") + "</tbody>";
+        : `<tr data-s="${esc(r.symbol)}">${stockCell(r)}${priceCells(r)}<td class="l c-act">${dual(r.hold, r.hold_long, r.hold_ultra)}</td>
+          <td class="why">${dualWhy(r.hold, r.hold_long, r.hold_ultra)}</td><td class="c-rm"><button class="x" data-rm="${esc(r.symbol)}" title="移除">✕</button></td></tr>`).join("") + "</tbody>";
   bindRows("#holdTable", "holdings");
 }
 
@@ -361,7 +366,7 @@ async function addSymbols(kind, raw, msg, btn) {
   good.forEach(r => { delete r.chart; rows.push(r); });
   kind === "watchlist" ? renderScan() : (renderHold(), notifyChanges());
   msg.textContent = [
-    good.length && "已加入 " + good.map(r => `${r.symbol}（短線${kind === "watchlist" ? r.advice.action : r.hold.action}／長線${kind === "watchlist" ? r.advice_long.action : r.hold_long.action}）`).join("、"),
+    good.length && "已加入 " + good.map(r => `${r.symbol}（短線${kind === "watchlist" ? r.advice.action : r.hold.action}／長線${kind === "watchlist" ? r.advice_long.action : r.hold_long.action}／超長線${kind === "watchlist" ? r.advice_ultra.action : r.hold_ultra.action}）`).join("、"),
     bad.length && `找不到 ${bad.join("、")}，請確認代號`,
     dup.length && `${dup.join("、")} 已經在清單裡`,
   ].filter(Boolean).join("；");
@@ -406,8 +411,8 @@ async function openDetail(sym) {
     <div><b style="font-size:20px">${fmt(r.price)}</b> <span class="${cls(r.change)}">${pct(r.change,2)}</span> <span class="muted">${esc(r.currency||"")} · ${r.date}</span></div>`;
   $("#dBody").innerHTML = `
     <div class="verdict">
-      ${[["還沒買・短線（約 1 個月）", r.advice], ["還沒買・長線（約半年到一年）", r.advice_long],
-         ["已持有・短線", r.hold], ["已持有・長線", r.hold_long]].map(([t, x]) =>
+      ${[["還沒買・短線（約 1 個月）", r.advice], ["還沒買・長線（約半年到一年）", r.advice_long], ["還沒買・超長線（5 年以上）", r.advice_ultra],
+         ["已持有・短線", r.hold], ["已持有・長線", r.hold_long], ["已持有・超長線", r.hold_ultra]].map(([t, x]) =>
         `<div><h4>${t}</h4>${badge(x.action)}<ul>${x.reasons.map(y => `<li>${esc(y)}</li>`).join("")}</ul></div>`).join("")}
     </div>
     <div style="height:280px"><canvas id="cv"></canvas></div>
@@ -443,7 +448,7 @@ function notifyChanges() {
   try { prev = JSON.parse(localStorage.getItem("holdActions") || "{}"); } catch {}
   const now = {};
   state.holdings.filter(r => !r.error).forEach(r => {
-    [["短線", r.hold], ["長線", r.hold_long]].forEach(([v, x]) => {
+    [["短線", r.hold], ["長線", r.hold_long], ["超長線", r.hold_ultra]].forEach(([v, x]) => {
       const k = `${r.symbol}:${v}`;
       now[k] = x.action;
       if (prev[k] && prev[k] !== x.action && x.action !== "續抱" && window.Notification?.permission === "granted")
@@ -482,7 +487,7 @@ function renderMarketScan() {
         rows.map(r => `<tr data-s="${esc(r.symbol)}">
           <td class="l"><span class="sym">${esc(r.symbol)}</span><span class="nm">${esc(r.name)}</span></td>
           <td class="c-px">${fmt(r.price)}<span class="m-chg ${cls(r.change)}">${pct(r.change, 2)}</span></td><td class="c-chg ${cls(r.change)}">${pct(r.change, 2)}</td>
-          <td class="l c-act">${dual({action: r.short}, {action: r.long})}</td>
+          <td class="l c-act">${dual({action: r.short}, {action: r.long}, r.ultra ? {action: r.ultra} : null)}</td>
           <td class="c-x2">${r.quality == null ? "–" : Math.round(r.quality * 100) + " 分"}</td>
           <td class="c-x2 ${cls(r.mos)}">${valuation({margin_of_safety: r.mos})}</td>
           <td class="c-x2">${fmt(r.pe, 1)}</td>
@@ -522,13 +527,28 @@ $("#btRun").onclick = async () => {
   $("#btRun").disabled = true;
   $("#btMsg").textContent = `正在回測 ${symbols.length} 檔股票、三種出場風格（第一次約需 30–90 秒）…`;
   try {
-    const runs = await Promise.all(Object.keys(MODES).map(mode => api("/api/backtest", {symbols, years, mode})));
+    const [runs, roll] = await Promise.all([
+      Promise.all(Object.keys(MODES).map(mode => api("/api/backtest", {symbols, years, mode}))),
+      api("/api/rolling", {symbols}),
+    ]);
     bt = Object.fromEntries(runs.map(r => [r.mode, r]));
     $("#btMsg").textContent = "";
     renderBt();
+    renderRolling(roll);
   } catch (e) { $("#btMsg").textContent = "回測失敗：" + e.message; }
   $("#btRun").disabled = false;
 };
+function renderRolling(d) {
+  const s = d.summary, row = r => r.error
+    ? `<tr><td class="l sym">${esc(r.symbol)}</td><td colspan="5" class="l muted">${esc(r.error)}</td></tr>`
+    : `<tr><td class="l sym">${esc(r.name || r.symbol)}</td><td>${pct(r.win_rate, 0)}</td><td>${r.beat_index == null ? "–" : pct(r.beat_index, 0)}</td>
+      <td class="${cls(r.median_cagr)}">${pct(r.median_cagr)}</td><td class="${cls(r.worst)}">${pct(r.worst, 0)}</td><td class="down">${pct(r.max_drawdown, 0)}</td></tr>`;
+  $("#rollOut").innerHTML = `<div class="panel">
+    <div class="toolbar"><b>超長線驗證：任何一天買進、抱滿 5 年</b><span class="muted" style="font-size:12px">用近 15 年資料（已還原股息）・平均 ${s.stocks} 檔：賺錢機率 ${pct(s.win_rate, 0)}、年化中位數 ${pct(s.median_cagr)}、中途最大跌幅 ${pct(s.avg_max_drawdown, 0)}</span></div>
+    <div class="scroll"><table><thead><tr><th class="l">股票／指數</th><th>賺錢機率</th><th>贏過大盤</th><th>年化報酬中位數</th><th>最差的 5 年</th><th>中途最大跌幅</th></tr></thead>
+    <tbody>${d.indexes.map(row).join("")}${d.results.map(row).join("")}</tbody></table></div></div>
+    <div class="warn" style="margin-top:12px"><b>限制：</b>個股是今天還存在的公司（倖存者偏差），當年曾是好公司、後來衰退或下市的沒有算進去，結果偏樂觀；這裡的兩個指數都未含股息，所以「贏過大盤」的比例也偏高。過去的表現不代表未來。</div>`;
+}
 function renderBt() {
   const keys = Object.keys(MODES), s0 = bt.short.summary;
   const best = keys.reduce((a, k) => (bt[k].summary.avg_strategy_return ?? -9) > (bt[a].summary.avg_strategy_return ?? -9) ? k : a, "short");
